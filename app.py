@@ -43,11 +43,19 @@ PURE_BLACK  = "#000000"
 
 st.markdown(f"""
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght=300;400;500;600;700&family=JetBrains+Mono:wght=400;500&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Open+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap');
 
-  html, body, [class*="css"], .stMarkdown, p, div, label, span {{
-    font-family: 'Inter', sans-serif;
-    color: {WHITE} !important;
+  html, body, [class*="css"] {{
+    font-family: 'Open Sans', sans-serif;
+  }}
+
+  /* Main content area: dark text on light backgrounds */
+  .main .block-container p,
+  .main .block-container div,
+  .main .block-container span,
+  .main .block-container label {{
+    font-family: 'Open Sans', sans-serif;
+    color: {PURE_BLACK};
   }}
 
   /* Sidebar */
@@ -132,10 +140,13 @@ st.markdown(f"""
   .section-title {{
     font-size: 1.05rem;
     font-weight: 700;
-    color: {WHITE} !important;
+    color: {BLUE_DARK} !important;
     border-left: 4px solid {BLUE_MID};
     padding-left: 0.75rem;
     margin: 1.5rem 0 0.8rem 0;
+    background: {BLUE_FAINT};
+    border-radius: 0 6px 6px 0;
+    padding: 0.45rem 0.75rem;
   }}
 
   /* Info box */
@@ -147,6 +158,48 @@ st.markdown(f"""
     font-size: 0.84rem;
     color: {PURE_BLACK} !important;
     margin-bottom: 1rem;
+  }}
+  .info-box *, .info-box p, .info-box span, .info-box div, .info-box strong {{
+    color: {PURE_BLACK} !important;
+  }}
+
+  /* ── Light-background containers: always dark text ───────────────────── */
+  /* Tabs content area */
+  .stTabs [data-baseweb="tab-panel"] p,
+  .stTabs [data-baseweb="tab-panel"] div,
+  .stTabs [data-baseweb="tab-panel"] span,
+  .stTabs [data-baseweb="tab-panel"] li,
+  .stTabs [data-baseweb="tab-panel"] td,
+  .stTabs [data-baseweb="tab-panel"] th,
+  .stTabs [data-baseweb="tab-panel"] label {{
+    color: {PURE_BLACK} !important;
+    font-family: 'Open Sans', sans-serif;
+  }}
+  /* Metric cards */
+  .metric-card,
+  .metric-card .label,
+  .metric-card .sublabel {{
+    color: {PURE_BLACK} !important;
+  }}
+  /* Dropped box */
+  .dropped-box *,
+  .dropped-box p,
+  .dropped-box span,
+  .dropped-box div {{
+    color: #7F1D1D !important;
+  }}
+  /* Dataframe / table cells */
+  [data-testid="stDataFrame"] td,
+  [data-testid="stDataFrame"] th,
+  .stDataFrame td,
+  .stDataFrame th {{
+    color: {PURE_BLACK} !important;
+  }}
+  /* st.success / st.error / st.warning native elements */
+  [data-testid="stAlert"] p,
+  [data-testid="stAlert"] div,
+  [data-testid="stAlert"] span {{
+    color: {PURE_BLACK} !important;
   }}
 
   /* Dropped states panel */
@@ -180,16 +233,31 @@ st.markdown(f"""
   /* Tabs */
   .stTabs [data-baseweb="tab-list"] {{ gap: 4px; border-bottom: 2px solid {BLUE_PALE}; }}
   .stTabs [data-baseweb="tab"] {{
-    background: transparent;
+    background: rgba(219,234,254,0.3);
     border-radius: 6px 6px 0 0;
     font-weight: 500;
-    color: {PURE_BLACK} !important;
+    color: {BLUE_DARK} !important;
     padding: 0.5rem 1rem;
+    font-size: 0.85rem;
+  }}
+  .stTabs [data-baseweb="tab"] p,
+  .stTabs [data-baseweb="tab"] span {{
+    color: {BLUE_DARK} !important;
   }}
   .stTabs [aria-selected="true"] {{
-    background: {BLUE_PALE} !important;
-    color: {PURE_BLACK} !important;
+    background: {BLUE_MID} !important;
+    color: {WHITE} !important;
     font-weight: 700 !important;
+  }}
+  .stTabs [aria-selected="true"] p,
+  .stTabs [aria-selected="true"] span {{
+    color: {WHITE} !important;
+  }}
+  /* Tab panel: white background, dark text */
+  .stTabs [data-baseweb="tab-panel"] {{
+    background: {WHITE};
+    border-radius: 0 0 8px 8px;
+    padding: 1rem 0.5rem;
   }}
 </style>
 """, unsafe_allow_html=True)
@@ -239,7 +307,7 @@ OUTPUT_FLAG_COLUMNS = [
     "Wrong Entry Fulani","Wrong Entry Validation status","No Statename",
     "No LGAname","Wrong Entry Wardname","No Settlement name",
     "Settlement name with 1Chars","Settlement name with 2Chars",
-    "Settlement name with more than 20Chars","Wrong Entry Population",
+    "Settlement name with more than 50Chars","Wrong Entry Population",
     "Wrong Entry TargetPop","Non-Numerical Latitude","Non-Numerical Longitude",
     "Non-Numerical Target Population","Non-Numerical Sett Population",
     "Non-Numerical NonCompliant Household","Non-Numerical Team Code",
@@ -509,15 +577,15 @@ def run_attribute_checks(df, progress_cb=None):
         slen = df["settlement_name"].apply(lambda v: len(safe_str(v)))
         df = flag_col(df, "Settlement name with 1Chars", slen == 1)
         df = flag_col(df, "Settlement name with 2Chars", slen == 2)
-        df = flag_col(df, "Settlement name with more than 20Chars", slen > 20)
+        df = flag_col(df, "Settlement name with more than 50Chars", slen > 50)
     else:
-        for f in ["Settlement name with 1Chars","Settlement name with 2Chars","Settlement name with more than 20Chars"]:
+        for f in ["Settlement name with 1Chars","Settlement name with 2Chars","Settlement name with more than 50Chars"]:
             df[f] = ""
 
     # Requirement 1: Create Program team verification column based on length criteria
     prog_mask = (df["Settlement name with 1Chars"] == "Y") | \
                 (df["Settlement name with 2Chars"] == "Y") | \
-                (df["Settlement name with more than 20Chars"] == "Y")
+                (df["Settlement name with more than 50Chars"] == "Y")
     df = flag_col(df, "Confirm with Programs team", prog_mask)
 
     _progress("Checking population fields…", 38)
@@ -581,6 +649,26 @@ def run_attribute_checks(df, progress_cb=None):
         df = flag_col(df, "Wrong Entry Day of Activity Entry", pd.Series(day_wrong))
     else:
         df["Wrong Entry Day of Activity Entry"] = ""
+
+    # ── Validated Unknown override ─────────────────────────────────────────
+    # If validation_status = 'Validated Unknown', the following 6 critical-flag
+    # sub-conditions are not applicable and must be set to blank.
+    VALIDATED_UNKNOWN_EXEMPT_FLAGS = [
+        "Wrong Entry Day of Activity Entry",
+        "Settlement Type Conflict",
+        "Non-Numerical Number of Household",
+        "Wrong Entry Urban",
+        "Wrong Entry Rural",
+        "Wrong Entry Scattered",
+    ]
+    if "validation_status" in df.columns:
+        is_validated_unknown = df["validation_status"].apply(
+            lambda v: safe_str(v) == "Validated Unknown"
+        )
+        for flag_name in VALIDATED_UNKNOWN_EXEMPT_FLAGS:
+            if flag_name in df.columns:
+                df.loc[is_validated_unknown, flag_name] = ""
+    # ──────────────────────────────────────────────────────────────────────
 
     return df
 
@@ -932,6 +1020,11 @@ def render_sidebar():
 
         st.markdown("<br><b style='color:#FFFFFF !important;'>STEP 2 · WARD BOUNDARY</b>", unsafe_allow_html=True)
         st.caption("Shapefile (.zip with .shp) or GeoJSON")
+        st.markdown(
+            "<a href='https://drive.google.com/drive/folders/1Mtp1gZ7hd7ENk9u99f5NVlxsgSl1Dba1?usp=sharing' "
+            "target='_blank' style='color:#93C5FD !important; font-size:0.75rem;'>🔗 eHA Ward Boundary Download</a>",
+            unsafe_allow_html=True
+        )
         ward_file = st.file_uploader(
             "Ward Boundary",
             type=["zip","geojson","json"],
@@ -941,6 +1034,11 @@ def render_sidebar():
 
         st.markdown("<br><b style='color:#FFFFFF !important;'>STEP 3 · SETTLEMENT EXTENT</b>", unsafe_allow_html=True)
         st.caption("Grid3 Settlement Extent v3.1 (.zip or GeoJSON)")
+        st.markdown(
+            "<a href='https://drive.google.com/drive/folders/1jVtU3J9MsZnkoMk6l8zl4oDmIehmPimx?usp=sharing' "
+            "target='_blank' style='color:#93C5FD !important; font-size:0.75rem;'>🔗 Grid3 Extents Download</a>",
+            unsafe_allow_html=True
+        )
         sett_file = st.file_uploader(
             "Grid3 Settlement Extent",
             type=["zip","geojson","json"],
@@ -960,6 +1058,11 @@ def render_sidebar():
         String match: RapidFuzz ≥95%<br>
         </div>
         """, unsafe_allow_html=True)
+        st.markdown(
+            "<br><a href='https://docs.google.com/document/d/1mZsIgAwfh4CzzIyXXqRHu9OC_3-0zSOjMI3OowvVt2Q/edit?usp=sharing' "
+            "target='_blank' style='color:#93C5FD !important; font-size:0.75rem;'>📄 Platform Key Notes</a>",
+            unsafe_allow_html=True
+        )
 
     return mlos_files, ward_file, sett_file, run_btn
 
@@ -1020,14 +1123,18 @@ def main():
 
     if not run_btn:
         if not mlos_files:
+            # ── Getting Started Banner ──────────────────────────────────────
             st.markdown(f"""
-            <div class='info-box'>
-            👈  Upload your MLoS state files, ward boundary, and Grid3 settlement extent in the sidebar, then click <strong>Run QA/QC</strong>.
-            <br><br>
+            <div class='info-box' style='background:linear-gradient(135deg,{BLUE_FAINT} 0%,#E0EAFF 100%); border:1px solid {BLUE_PALE}; border-radius:10px; padding:1rem 1.2rem; margin-bottom:1.2rem;'>
+            <span style='font-size:1.1rem; font-weight:700; color:{BLUE_DARK} !important;'>👈 How to get started</span><br>
+            <span style='color:{PURE_BLACK} !important; font-size:0.88rem;'>
+            Upload your MLoS state file(s), Ward Boundary, and Grid3 Settlement Extent in the sidebar, then click <strong>▶ Run QA/QC</strong>.<br>
             <strong>Supported formats:</strong> MLoS → CSV or Excel &nbsp;|&nbsp; Spatial → Shapefile (.zip) or GeoJSON
+            </span>
             </div>
             """, unsafe_allow_html=True)
 
+            # ── Quick Stats ─────────────────────────────────────────────────
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.markdown(f"""
@@ -1050,6 +1157,205 @@ def main():
                   <div class='value val-blue'>51</div>
                   <div class='sublabel'>added to merged CSV</div>
                 </div>""", unsafe_allow_html=True)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # ── Key Notes Tabs ───────────────────────────────────────────────
+            st.markdown(f"<div class='section-title'>📖 Platform Key Notes</div>", unsafe_allow_html=True)
+            st.markdown(f"""
+            <div style='font-size:0.82rem; color:{PURE_BLACK} !important; margin-bottom:0.8rem;'>
+            Read these notes carefully before using the platform. A full version of this document is available here:
+            <a href='https://docs.google.com/document/d/1mZsIgAwfh4CzzIyXXqRHu9OC_3-0zSOjMI3OowvVt2Q/edit?usp=sharing'
+               target='_blank' style='color:{BLUE_MID} !important; font-weight:600;'>📄 MLoS Platform Key Notes (Google Doc)</a>
+            </div>
+            """, unsafe_allow_html=True)
+
+            kn_tab1, kn_tab2, kn_tab3 = st.tabs([
+                "  📂 1. Data Sources  ",
+                "  📋 2. MLoS Schema  ",
+                "  🚨 3. Critical Flags  ",
+            ])
+
+            # Tab 1 — Data Sources
+            with kn_tab1:
+                st.markdown(f"""
+                <p style='color:{PURE_BLACK} !important; font-size:0.88rem; margin-bottom:0.8rem;'>
+                Three data sources are required to run the QA/QC. Upload them in the sidebar as described below.
+                </p>
+                """, unsafe_allow_html=True)
+
+                src_data = [
+                    ("1", "State MLoS", "User input (CSV or Excel)", "—"),
+                    ("2", "Ward Boundary", "eHA Ward Boundary",
+                     "https://drive.google.com/drive/folders/1Mtp1gZ7hd7ENk9u99f5NVlxsgSl1Dba1?usp=sharing"),
+                    ("3", "Grid3 Extent v3.1", "Grid3 Extent States Folder (pick your state)",
+                     "https://drive.google.com/drive/folders/1jVtU3J9MsZnkoMk6l8zl4oDmIehmPimx?usp=sharing"),
+                ]
+
+                rows_html = ""
+                for sn, data, source, link in src_data:
+                    link_cell = (
+                        f"<a href='{link}' target='_blank' style='color:{BLUE_MID} !important; font-weight:600;'>🔗 Download</a>"
+                        if link != "—" else "<span style='color:#999;'>—</span>"
+                    )
+                    rows_html += f"""
+                    <tr>
+                      <td style='padding:0.5rem 0.8rem; border-bottom:1px solid #E2E8F0; color:{PURE_BLACK} !important; font-weight:600; width:40px;'>{sn}</td>
+                      <td style='padding:0.5rem 0.8rem; border-bottom:1px solid #E2E8F0; color:{PURE_BLACK} !important; font-weight:600;'>{data}</td>
+                      <td style='padding:0.5rem 0.8rem; border-bottom:1px solid #E2E8F0; color:{PURE_BLACK} !important;'>{source}</td>
+                      <td style='padding:0.5rem 0.8rem; border-bottom:1px solid #E2E8F0;'>{link_cell}</td>
+                    </tr>"""
+
+                st.markdown(f"""
+                <div style='overflow-x:auto; border-radius:8px; border:1px solid #E2E8F0;'>
+                <table style='width:100%; border-collapse:collapse; font-family:"Open Sans",sans-serif; font-size:0.84rem; background:#FFFFFF;'>
+                  <thead>
+                    <tr style='background:{BLUE_DARK};'>
+                      <th style='padding:0.6rem 0.8rem; color:#FFFFFF; text-align:left; font-weight:600;'>#</th>
+                      <th style='padding:0.6rem 0.8rem; color:#FFFFFF; text-align:left; font-weight:600;'>Data</th>
+                      <th style='padding:0.6rem 0.8rem; color:#FFFFFF; text-align:left; font-weight:600;'>Source</th>
+                      <th style='padding:0.6rem 0.8rem; color:#FFFFFF; text-align:left; font-weight:600;'>Download Link</th>
+                    </tr>
+                  </thead>
+                  <tbody>{rows_html}</tbody>
+                </table>
+                </div>
+                """, unsafe_allow_html=True)
+
+            # Tab 2 — MLoS Schema
+            with kn_tab2:
+                st.markdown(f"""
+                <p style='color:{PURE_BLACK} !important; font-size:0.88rem; margin-bottom:0.8rem;'>
+                The MLoS file schema must match <strong>exactly</strong> — same column names and same order.
+                If there is a mismatch, the platform will reject that file.
+                </p>
+                """, unsafe_allow_html=True)
+
+                schema_rows = [
+                    ("1","sn","serial","Unique sequential numeric identifier"),
+                    ("2","unique_code","varchar","Concatenation of state, LGA, ward and settlement name"),
+                    ("3","state_name","varchar","State name"),
+                    ("4","lga_name","varchar","LGA name"),
+                    ("5","ward_name","varchar","Ward name"),
+                    ("6","take_off_point","varchar","Take-off point of vaccination teams"),
+                    ("7","settlement_name","varchar","Settlement name"),
+                    ("8","primary_settlement_name","varchar","Name of primary settlement"),
+                    ("9","alternate_name","varchar","Alternative or other name of the settlement"),
+                    ("10","latitude","decimal","Geocoordinate, Y value"),
+                    ("11","longitude","decimal","Geocoordinate, X value"),
+                    ("12","security_compromised","char(1)","Y or N or NA"),
+                    ("13","accessibility_status","varchar","Fully Accessible / Inaccessible / Partially Accessible"),
+                    ("14","reasons_for_inaccessibility","varchar","Reason for inaccessibility"),
+                    ("15","habitational_status","varchar","Inhabited / Partially Inhabited / Abandoned / Migrated"),
+                    ("16","set_population","int","Settlement population"),
+                    ("17","set_target","int","Settlement target population"),
+                    ("18","number_of_household","int","Number of households"),
+                    ("19","noncompliant_household","int","Non-compliant households"),
+                    ("20","team_code","int","Team code"),
+                    ("21","day_of_activity","varchar","1, 2, 3, 4 or combinations (underscore-separated) or NA"),
+                    ("22","urban","char(1)","Y or N"),
+                    ("23","rural","char(1)","Y or N"),
+                    ("24","scattered","char(1)","Y or N"),
+                    ("25","highrisk","char(1)","Y or N or NA"),
+                    ("26","slums","char(1)","Y or N or NA"),
+                    ("27","densely_populated","char(1)","Y or N or NA"),
+                    ("28","hard2reach","char(1)","Y or N or NA"),
+                    ("29","border","char(1)","Y or N or NA"),
+                    ("30","nomadic","char(1)","Y or N or NA"),
+                    ("31","riverine","char(1)","Y or N or NA"),
+                    ("32","fulani","char(1)","Y or N or NA"),
+                    ("33","source","varchar","Source of settlement data — must not be empty"),
+                    ("34","comments","text","Comments about the settlement"),
+                    ("35","globalid","uuid","Settlement unique ID"),
+                    ("36","validation_status","varchar","Validated / Not Validated / Validation Ongoing / Validated Unknown"),
+                    ("37","gis_feedback","text","Feedback comments from state data analysts"),
+                    ("38","master.id","serial","Unique ID from national MLoS harmonisation"),
+                    ("39","mlos_id","varchar","Unique ID from national MLoS harmonisation"),
+                    ("40","eha_guid","uuid","Unique ID from eHA database"),
+                ]
+
+                schema_rows_html = "".join(
+                    f"<tr style='background:{'#F8FAFF' if int(pos) % 2 == 0 else '#FFFFFF'};'>"
+                    f"<td style='padding:0.4rem 0.7rem; border-bottom:1px solid #EEF2FF; color:{PURE_BLACK} !important; text-align:center;'>{pos}</td>"
+                    f"<td style='padding:0.4rem 0.7rem; border-bottom:1px solid #EEF2FF; font-family:monospace; font-weight:600; color:{BLUE_MID} !important;'>{name}</td>"
+                    f"<td style='padding:0.4rem 0.7rem; border-bottom:1px solid #EEF2FF; color:#6B7280 !important;'>{dtype}</td>"
+                    f"<td style='padding:0.4rem 0.7rem; border-bottom:1px solid #EEF2FF; color:{PURE_BLACK} !important;'>{desc}</td>"
+                    f"</tr>"
+                    for pos, name, dtype, desc in schema_rows
+                )
+
+                st.markdown(f"""
+                <div style='overflow-x:auto; border-radius:8px; border:1px solid #E2E8F0; max-height:420px; overflow-y:auto;'>
+                <table style='width:100%; border-collapse:collapse; font-family:"Open Sans",sans-serif; font-size:0.82rem;'>
+                  <thead style='position:sticky; top:0; z-index:1;'>
+                    <tr style='background:{BLUE_DARK};'>
+                      <th style='padding:0.6rem 0.7rem; color:#FFFFFF; text-align:center; min-width:40px;'>#</th>
+                      <th style='padding:0.6rem 0.7rem; color:#FFFFFF; text-align:left; min-width:180px;'>Field Name</th>
+                      <th style='padding:0.6rem 0.7rem; color:#FFFFFF; text-align:left; min-width:80px;'>Type</th>
+                      <th style='padding:0.6rem 0.7rem; color:#FFFFFF; text-align:left;'>Description</th>
+                    </tr>
+                  </thead>
+                  <tbody>{schema_rows_html}</tbody>
+                </table>
+                </div>
+                """, unsafe_allow_html=True)
+
+            # Tab 3 — Critical Flags
+            with kn_tab3:
+                st.markdown(f"""
+                <div style='background:#FEF2F2; border:1px solid #FECACA; border-radius:8px; padding:0.8rem 1rem; margin-bottom:0.8rem; font-size:0.87rem; color:#7F1D1D !important;'>
+                ⛔ <strong>11 Critical Flags</strong> must be resolved before the MLoS can be accepted. Records with any critical flag active will be returned to the analyst.
+                </div>
+                """, unsafe_allow_html=True)
+
+                critical_rows = [
+                    ("1","attribute duplicate = 'Y'","Remove records with the same state, LGA, ward and settlement name."),
+                    ("2","Stacked points = 'Y'","Remove records with identical latitude/longitude coordinates."),
+                    ("3","Duplicate eha_guid = 'Y'","Remove duplicate GUID codes not present in the previous version."),
+                    ("4","Wrong Entry Source","Input a valid source for the record."),
+                    ("5","Population Conflict = 'Y'","Target population cannot be equal to or less than settlement population."),
+                    ("6","Wrong Entry Day of Activity Entry = 'Y'",
+                     "Day of activity accepts: 1, 2, 3, 4, 1_2, 1_3, 1_4, 2_3, 2_4, 3_4, 1_2_3, 1_2_4, 1_3_4, 2_3_4, 1_2_3_4, NA. "
+                     "⚠️ Ignored if validation_status = 'Validated Unknown'."),
+                    ("7","Non-Numerical Number of Household = 'Y'",
+                     "Remove non-numerical entries. ⚠️ Ignored if validation_status = 'Validated Unknown'."),
+                    ("8","Wrong Entry Urban = 'Y'",
+                     "Must be 'Y' or 'N'. ⚠️ Ignored if validation_status = 'Validated Unknown'."),
+                    ("9","Wrong Entry Rural = 'Y'",
+                     "Must be 'Y' or 'N'. ⚠️ Ignored if validation_status = 'Validated Unknown'."),
+                    ("10","Wrong Entry Scattered = 'Y'",
+                     "Must be 'Y' or 'N'. ⚠️ Ignored if validation_status = 'Validated Unknown'."),
+                    ("11","Settlement Type Conflict = 'Y'",
+                     "'Urban', 'rural', 'scattered' cannot all be the same entry. ⚠️ Ignored if validation_status = 'Validated Unknown'."),
+                ]
+
+                crit_rows_html = "".join(
+                    f"<tr style='background:{'#FFF7F7' if int(sn) % 2 == 0 else '#FFFFFF'};'>"
+                    f"<td style='padding:0.45rem 0.7rem; border-bottom:1px solid #FEE2E2; color:{PURE_BLACK} !important; text-align:center; font-weight:700;'>{sn}</td>"
+                    f"<td style='padding:0.45rem 0.7rem; border-bottom:1px solid #FEE2E2; font-weight:600; color:#DC2626 !important; font-size:0.82rem;'>{flag}</td>"
+                    f"<td style='padding:0.45rem 0.7rem; border-bottom:1px solid #FEE2E2; color:{PURE_BLACK} !important; font-size:0.82rem;'>{resolution}</td>"
+                    f"</tr>"
+                    for sn, flag, resolution in critical_rows
+                )
+
+                st.markdown(f"""
+                <div style='overflow-x:auto; border-radius:8px; border:1px solid #FEE2E2;'>
+                <table style='width:100%; border-collapse:collapse; font-family:"Open Sans",sans-serif;'>
+                  <thead>
+                    <tr style='background:#991B1B;'>
+                      <th style='padding:0.6rem 0.7rem; color:#FFFFFF; text-align:center; width:40px;'>#</th>
+                      <th style='padding:0.6rem 0.7rem; color:#FFFFFF; text-align:left; min-width:220px;'>Critical Flag</th>
+                      <th style='padding:0.6rem 0.7rem; color:#FFFFFF; text-align:left;'>Resolution / Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>{crit_rows_html}</tbody>
+                </table>
+                </div>
+                <p style='font-size:0.78rem; color:#6B7280 !important; margin-top:0.5rem;'>
+                ⚠️ Flags marked as "Ignored if validation_status = 'Validated Unknown'" will be automatically blanked out by the platform for those records.
+                </p>
+                """, unsafe_allow_html=True)
+
         return
 
     if not mlos_files:
@@ -1209,34 +1515,19 @@ def main():
     st.markdown("<div class='section-title'>📋 State-level Summary Table</div>", unsafe_allow_html=True)
     summary_tbl = build_state_summary(df_view)
     if not summary_tbl.empty:
-        st.dataframe(summary_tbl, use_container_width=True, hide_index=True)
+        def _amber_critical(val):
+            """Highlight non-zero critical error counts in amber."""
+            try:
+                if int(val) > 0:
+                    return "background-color: #D97706; color: #FFFFFF; font-weight: 700;"
+            except (ValueError, TypeError):
+                pass
+            return ""
 
-    st.markdown("<div class='section-title'>🔬 Error Flag Breakdown</div>", unsafe_allow_html=True)
-    flag_counts = {}
-    for fc in OUTPUT_FLAG_COLUMNS:
-        if fc in df_view.columns:
-            cnt = (df_view[fc] == "Y").sum()
-            if cnt > 0:
-                flag_counts[fc] = cnt
-
-    if flag_counts:
-        fc_df = pd.DataFrame(list(flag_counts.items()), columns=["Flag","Count"]).sort_values("Count", ascending=False)
-        fig_flags = px.bar(
-            fc_df.head(25), x="Count", y="Flag", orientation="h",
-            color="Count",
-            color_continuous_scale=[[0, BLUE_PALE],[0.5, BLUE_LIGHT],[1, BLUE_DARK]],
-            title="Top 25 Most Frequent Error Flags",
-            labels={"Flag":"","Count":"Records Flagged"},
-        )
-        fig_flags.update_layout(
-            height=520, coloraxis_showscale=False,
-            margin=dict(l=10,r=20,t=50,b=10),
-            paper_bgcolor="white", plot_bgcolor=GREY_LIGHT,
-            title_font=dict(size=14, color=PURE_BLACK),
-            xaxis=dict(tickfont=dict(color=PURE_BLACK)),
-            yaxis=dict(tickfont=dict(size=10, color=PURE_BLACK)),
-        )
-        st.plotly_chart(fig_flags, use_container_width=True)
+        # pandas >= 2.1 renamed applymap → map; support both versions
+        _style_method = getattr(summary_tbl.style, "map", None) or getattr(summary_tbl.style, "applymap")
+        styled_summary = _style_method(_amber_critical, subset=["Critical Errors"])
+        st.dataframe(styled_summary, use_container_width=True, hide_index=True)
 
     st.markdown("<div class='section-title'>🗃️ Data Preview (first 500 rows)</div>", unsafe_allow_html=True)
     preview_cols = list(df_out.columns[:15]) + ["Critical Error Flag","Spatial Issues","Attribute Issues","No Issues","Confirm with Programs team"]
