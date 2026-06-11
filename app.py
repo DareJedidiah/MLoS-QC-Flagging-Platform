@@ -298,7 +298,7 @@ OUTPUT_FLAG_COLUMNS = [
     "Confirm with Programs team", # Added row length verification check flag
     "attribute duplicate","Stacked points","Wrong Entry Source",
     "Population Conflict","Duplicate eha_guid","Settlement Type Conflict",
-    "Non-Numerical Number of Household","Wrong Entry Day of Activity Entry",
+    "Non-Numerical Number of Household","Wrong Entry Day of Activity Entry","Security and Accessibility conflict",
     "Wrong Entry SecurityComp","Wrong Entry Accesibility_status",
     "Wrong Entry reasons_for_inaccessibility","Wrong Entry Habitational_status",
     "Wrong Entry Urban","Wrong Entry Rural","Wrong Entry Scattered",
@@ -320,7 +320,8 @@ CRITICAL_ERROR_FLAGS = [
     "attribute duplicate","Stacked points","Wrong Entry Source",
     "Population Conflict","Duplicate eha_guid","Settlement Type Conflict",
     "Non-Numerical Number of Household","Wrong Entry Day of Activity Entry",
-    "Wrong Entry Urban","Wrong Entry Rural","Wrong Entry Scattered"
+    "Wrong Entry Urban","Wrong Entry Rural","Wrong Entry Scattered",
+    "Security and Accessibility conflict"
 ]
 
 SPATIAL_FLAGS = [
@@ -343,7 +344,7 @@ ATTRIBUTE_FLAGS = [
     "Non-Numerical Longitude","Non-Numerical Target Population",
     "Non-Numerical Sett Population","Non-Numerical Number of Household",
     "Non-Numerical NonCompliant Household","Non-Numerical Team Code",
-    "Wrong Entry Day of Activity Entry"
+    "Wrong Entry Day of Activity Entry","Security and Accessibility conflict"
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -420,6 +421,14 @@ def prepare_data(df):
         if col in df.columns:
             df[col] = df[col].apply(lambda v: "" if is_blank(v) else str(v).strip())
 
+    # Proper Case + Trim on name columns before rebuilding unique_code
+    PROPER_CASE_COLS = ["state_name", "lga_name", "ward_name", "settlement_name"]
+    for col in PROPER_CASE_COLS:
+        if col in df.columns:
+            df[col] = df[col].apply(
+                lambda v: "" if is_blank(v) else str(v).strip().title()
+            )
+
     def _mk_code(row):
         parts = [
             safe_str(row.get("state_name","")),
@@ -455,6 +464,27 @@ def run_attribute_checks(df, progress_cb=None):
         if progress_cb:
             progress_cb(msg, pct)
 
+    # ── Pre-processing: UPPER on Y/N flag columns ─────────────────────────────
+    UPPER_COLS = [
+        "security_compromised","urban","rural","scattered",
+        "highrisk","slums","densely_populated","hard2reach",
+        "border","nomadic","riverine","fulani"
+    ]
+    for col in UPPER_COLS:
+        if col in df.columns:
+            df[col] = df[col].apply(
+                lambda v: "" if is_blank(v) else str(v).strip().upper()
+            )
+
+    # ── Pre-processing: TRIM + PROPER on status columns ───────────────────────
+    PROPER_STATUS_COLS = ["validation_status", "accessibility_status", "habitational_status"]
+    for col in PROPER_STATUS_COLS:
+        if col in df.columns:
+            df[col] = df[col].apply(
+                lambda v: "" if is_blank(v) else str(v).strip().title()
+            )
+    # ─────────────────────────────────────────────────────────────────────────
+
     _progress("Checking duplicates…", 2)
 
     dup_key = ["state_name","lga_name","ward_name","settlement_name"]
@@ -481,6 +511,20 @@ def run_attribute_checks(df, progress_cb=None):
         axis=1
     )
     df = flag_col(df, "Wrong Entry reasons_for_inaccessibility", mask_rfi)
+
+    _progress("Checking security & accessibility conflict…", 12)
+
+    # Flag: security_compromised = 'Y' AND accessibility_status = 'Fully Accessible'
+    # AND reasons_for_inaccessibility is blank/null/empty
+    mask_sac = df.apply(
+        lambda r: (
+            safe_str(r.get("security_compromised","")) == "Y"
+            and safe_str(r.get("accessibility_status","")) == "Fully Accessible"
+            and is_blank(r.get("reasons_for_inaccessibility",""))
+        ),
+        axis=1
+    )
+    df = flag_col(df, "Security and Accessibility conflict", mask_sac)
 
     _progress("Checking habitational_status…", 13)
 
@@ -706,6 +750,12 @@ def run_spatial_checks(df, ward_gdf=None, settlement_gdf=None, progress_cb=None)
         lat, lon = row.get("latitude", np.nan), row.get("longitude", np.nan)
         return is_blank(lat) or is_blank(lon) or (isinstance(lat, float) and np.isnan(lat)) or (isinstance(lon, float) and np.isnan(lon))
     df = flag_col(df, "No Geocoordinates", df.apply(_no_geo, axis=1))
+
+    # Set latitude and longitude to 0 for records with no geocoordinates
+    no_geo_mask = df["No Geocoordinates"] == "Y"
+    if no_geo_mask.any():
+        df.loc[no_geo_mask, "latitude"]  = 0
+        df.loc[no_geo_mask, "longitude"] = 0
 
     _progress("Checking stacked points…", 53)
 
@@ -1304,7 +1354,7 @@ def main():
             with kn_tab3:
                 st.markdown(f"""
                 <div style='background:#FEF2F2; border:1px solid #FECACA; border-radius:8px; padding:0.8rem 1rem; margin-bottom:0.8rem; font-size:0.87rem; color:#7F1D1D !important;'>
-                ⛔ <strong>11 Critical Flags</strong> must be resolved before the MLoS can be accepted. Records with any critical flag active will be returned to the analyst.
+                ⛔ <strong>12 Critical Flags</strong> must be resolved before the MLoS can be accepted. Records with any critical flag active will be returned to the analyst.
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -1327,6 +1377,11 @@ def main():
                      "Must be 'Y' or 'N'. ⚠️ Ignored if validation_status = 'Validated Unknown'."),
                     ("11","Settlement Type Conflict = 'Y'",
                      "'Urban', 'rural', 'scattered' cannot all be the same entry. ⚠️ Ignored if validation_status = 'Validated Unknown'."),
+                    ("12","Security and Accessibility conflict = 'Y'",
+                     "Flagged when security_compromised = 'Y' AND accessibility_status = 'Fully Accessible' AND "
+                     "reasons_for_inaccessibility is blank/null/empty. A security-compromised settlement cannot be "
+                     "fully accessible without a documented reason for inaccessibility. Update security_compromised, "
+                     "accessibility_status, or provide a reason for inaccessibility to resolve."),
                 ]
 
                 crit_rows_html = "".join(
