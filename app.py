@@ -313,7 +313,7 @@ OUTPUT_FLAG_COLUMNS = [
     "Confirm with Programs team", # Added row length verification check flag
     "attribute duplicate","Stacked points","Wrong Entry Source",
     "Population Conflict","Duplicate eha_guid","Settlement Type Conflict",
-    "Wrong Entry Number of Household","Wrong Entry Day of Activity Entry","Security and Accessibility conflict",
+    "Non-Numerical Number of Household","Wrong Entry Day of Activity Entry","Security and Accessibility conflict",
     "Wrong Entry SecurityComp","Wrong Entry Accesibility_status",
     "Wrong Entry reasons_for_inaccessibility","Wrong Entry Habitational_status",
     "Wrong Entry Urban","Wrong Entry Rural","Wrong Entry Scattered",
@@ -334,7 +334,7 @@ OUTPUT_FLAG_COLUMNS = [
 CRITICAL_ERROR_FLAGS = [
     "attribute duplicate","Stacked points","Wrong Entry Source",
     "Population Conflict","Duplicate eha_guid","Settlement Type Conflict",
-    "Wrong Entry Number of Household","Wrong Entry Day of Activity Entry",
+    "Non-Numerical Number of Household","Wrong Entry Day of Activity Entry",
     "Wrong Entry Urban","Wrong Entry Rural","Wrong Entry Scattered",
     "Security and Accessibility conflict"
 ]
@@ -357,7 +357,7 @@ ATTRIBUTE_FLAGS = [
     "Settlement name with 1Chars","Wrong Entry Population",
     "Wrong Entry TargetPop","Population Conflict","Non-Numerical Latitude",
     "Non-Numerical Longitude","Non-Numerical Target Population",
-    "Non-Numerical Sett Population","Wrong Entry Number of Household",
+    "Non-Numerical Sett Population","Non-Numerical Number of Household",
     "Non-Numerical NonCompliant Household","Non-Numerical Team Code",
     "Wrong Entry Day of Activity Entry","Security and Accessibility conflict"
 ]
@@ -735,10 +735,10 @@ def run_attribute_checks(df, progress_cb=None):
                 _is_numeric_val(v) and float(str(v).strip()) == 0
             )
         )
-        df = flag_col(df, "Wrong Entry Number of Household",
+        df = flag_col(df, "Non-Numerical Number of Household",
                       hh_wrong_type | (hh_blank_zero & ~exempt_pop_activity))
     else:
-        df["Wrong Entry Number of Household"] = ""
+        df["Non-Numerical Number of Household"] = ""
 
     # noncompliant_household and team_code: zero is a valid entry — do NOT flag zero;
     # only flag blank/null (subject to Rule 2 exemption) or non-numeric text (always).
@@ -799,7 +799,7 @@ def _fix_sc(row_sc, row_ac):
         return v, False
     if is_blank(row_sc):
         if safe_str(row_ac) == "Fully Accessible":
-            return "Y", False
+            return "N", False
         else:
             return "NA", False
     return v, True
@@ -1441,7 +1441,7 @@ def main():
                     ("6","Wrong Entry Day of Activity Entry = 'Y'",
                      "Day of activity accepts: 1, 2, 3, 4, 1_2, 1_3, 1_4, 2_3, 2_4, 3_4, 1_2_3, 1_2_4, 1_3_4, 2_3_4, 1_2_3_4, NA. "
                      "⚠️ Ignored if validation_status = 'Validated Unknown'."),
-                    ("7","Wrong Entry Number of Household = 'Y'",
+                    ("7","Non-Numerical Number of Household = 'Y'",
                      "Remove non-numerical entries. ⚠️ Ignored if validation_status = 'Validated Unknown'."),
                     ("8","Wrong Entry Urban = 'Y'",
                      "Must be 'Y' or 'N'. ⚠️ Ignored if validation_status = 'Validated Unknown'."),
