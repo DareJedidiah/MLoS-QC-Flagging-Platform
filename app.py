@@ -313,7 +313,7 @@ OUTPUT_FLAG_COLUMNS = [
     "Confirm with Programs team", # Added row length verification check flag
     "attribute duplicate","Stacked points","Wrong Entry Source",
     "Population Conflict","Duplicate eha_guid","Settlement Type Conflict",
-    "Non-Numerical Number of Household","Wrong Entry Day of Activity Entry","Security and Accessibility conflict",
+    "Wrong Entry Number of Household","Wrong Entry Day of Activity Entry","Security and Accessibility conflict",
     "Wrong Entry SecurityComp","Wrong Entry Accesibility_status",
     "Wrong Entry reasons_for_inaccessibility","Wrong Entry Habitational_status",
     "Wrong Entry Urban","Wrong Entry Rural","Wrong Entry Scattered",
@@ -334,7 +334,7 @@ OUTPUT_FLAG_COLUMNS = [
 CRITICAL_ERROR_FLAGS = [
     "attribute duplicate","Stacked points","Wrong Entry Source",
     "Population Conflict","Duplicate eha_guid","Settlement Type Conflict",
-    "Non-Numerical Number of Household","Wrong Entry Day of Activity Entry",
+    "Wrong Entry Number of Household","Wrong Entry Day of Activity Entry",
     "Wrong Entry Urban","Wrong Entry Rural","Wrong Entry Scattered",
     "Security and Accessibility conflict"
 ]
@@ -357,7 +357,7 @@ ATTRIBUTE_FLAGS = [
     "Settlement name with 1Chars","Wrong Entry Population",
     "Wrong Entry TargetPop","Population Conflict","Non-Numerical Latitude",
     "Non-Numerical Longitude","Non-Numerical Target Population",
-    "Non-Numerical Sett Population","Non-Numerical Number of Household",
+    "Non-Numerical Sett Population","Wrong Entry Number of Household",
     "Non-Numerical NonCompliant Household","Non-Numerical Team Code",
     "Wrong Entry Day of Activity Entry","Security and Accessibility conflict"
 ]
@@ -508,23 +508,40 @@ def run_attribute_checks(df, progress_cb=None):
 
     _progress("Checking security_compromised…", 5)
 
+    # Pre-compute Validated Unknown mask for use in exemption logic (Rule 1 & 2)
+    if "validation_status" in df.columns:
+        is_validated_unknown = df["validation_status"].apply(
+            lambda v: safe_str(v) == "Validated Unknown"
+        )
+    else:
+        is_validated_unknown = pd.Series([False] * n, index=df.index)
+
     valid_sc = {"Y","N","NA"}
     sc_fixed, sc_wrong = zip(*df.apply(lambda r: _fix_sc(r.get("security_compromised",""), r.get("accessibility_status","")), axis=1))
     df["security_compromised"] = list(sc_fixed)
-    df = flag_col(df, "Wrong Entry SecurityComp", pd.Series(sc_wrong))
+    # Rule 1: suppress null/blank flag on security_compromised for Validated Unknown
+    sc_wrong_series = pd.Series(sc_wrong, index=df.index)
+    # _fix_sc flags wrong entries (non-blank invalid values) — those still flag;
+    # but blank/null entries that resolve to a default should not flag for Validated Unknown.
+    # _fix_sc already returns False for blank inputs, so no additional suppression needed here.
+    df = flag_col(df, "Wrong Entry SecurityComp", sc_wrong_series)
 
     _progress("Checking accessibility_status…", 8)
 
     valid_acc = {"Fully Accessible","Inaccessible","Partially Accessible"}
+    # Rule 1: For Validated Unknown, do not flag blank/null accessibility_status
     mask_acc = df["accessibility_status"].apply(lambda v: safe_str(v) not in valid_acc)
+    mask_acc = mask_acc & ~(is_validated_unknown & df["accessibility_status"].apply(is_blank))
     df = flag_col(df, "Wrong Entry Accesibility_status", mask_acc)
 
     _progress("Checking reasons_for_inaccessibility…", 11)
 
+    # Rule 1: For Validated Unknown, do not flag blank/null reasons_for_inaccessibility
     mask_rfi = df.apply(
         lambda r: safe_str(r.get("accessibility_status","")) != "Fully Accessible" and is_blank(r.get("reasons_for_inaccessibility","")),
         axis=1
     )
+    mask_rfi = mask_rfi & ~(is_validated_unknown & df["reasons_for_inaccessibility"].apply(is_blank))
     df = flag_col(df, "Wrong Entry reasons_for_inaccessibility", mask_rfi)
 
     _progress("Checking security & accessibility conflict…", 12)
@@ -544,7 +561,9 @@ def run_attribute_checks(df, progress_cb=None):
     _progress("Checking habitational_status…", 13)
 
     valid_hab = {"Inhabited","Partially Inhabited","Abandoned","Migrated"}
+    # Rule 1: For Validated Unknown, do not flag blank/null habitational_status
     mask_hab = df["habitational_status"].apply(lambda v: safe_str(v) not in valid_hab)
+    mask_hab = mask_hab & ~(is_validated_unknown & df["habitational_status"].apply(is_blank))
     df = flag_col(df, "Wrong Entry Habitational_status", mask_hab)
 
     _progress("Checking urban/rural/scattered…", 15)
@@ -649,6 +668,16 @@ def run_attribute_checks(df, progress_cb=None):
 
     _progress("Checking population fields…", 38)
 
+    # Rule 2: Compute exemption mask — Validated Unknown OR habitational_status is Abandoned/Migrated
+    if "habitational_status" in df.columns:
+        is_abandoned_or_migrated = df["habitational_status"].apply(
+            lambda v: safe_str(v) in {"Abandoned", "Migrated"}
+        )
+    else:
+        is_abandoned_or_migrated = pd.Series([False] * n, index=df.index)
+
+    exempt_pop_activity = is_validated_unknown | is_abandoned_or_migrated
+
     def _bad_pop(v):
         if is_blank(v):
             return True
@@ -658,8 +687,11 @@ def run_attribute_checks(df, progress_cb=None):
         except (ValueError, TypeError):
             return True
 
-    df = flag_col(df, "Wrong Entry Population", df["set_population"].apply(_bad_pop) if "set_population" in df.columns else pd.Series([False]*n))
-    df = flag_col(df, "Wrong Entry TargetPop", df["set_target"].apply(_bad_pop) if "set_target" in df.columns else pd.Series([False]*n))
+    pop_mask = df["set_population"].apply(_bad_pop) if "set_population" in df.columns else pd.Series([False]*n)
+    tgt_mask = df["set_target"].apply(_bad_pop) if "set_target" in df.columns else pd.Series([False]*n)
+    # Rule 2: suppress for exempt rows
+    df = flag_col(df, "Wrong Entry Population", pop_mask & ~exempt_pop_activity)
+    df = flag_col(df, "Wrong Entry TargetPop",  tgt_mask & ~exempt_pop_activity)
 
     def _pop_conflict(row):
         sp = row.get("set_population","")
@@ -677,19 +709,51 @@ def run_attribute_checks(df, progress_cb=None):
 
     _progress("Checking numerical types…", 43)
 
-    numeric_checks = [
+    # Checks NOT subject to Rule 2 (lat/lon/set_target/set_population handled above)
+    non_exempt_numeric_checks = [
         ("latitude","Non-Numerical Latitude"),
         ("longitude","Non-Numerical Longitude"),
         ("set_target","Non-Numerical Target Population"),
         ("set_population","Non-Numerical Sett Population"),
-        ("number_of_household","Non-Numerical Number of Household"),
-        ("noncompliant_household","Non-Numerical NonCompliant Household"),
-        ("team_code","Non-Numerical Team Code"),
     ]
-    for src_col, flag_name in numeric_checks:
+    for src_col, flag_name in non_exempt_numeric_checks:
         if src_col in df.columns:
             mask = df[src_col].apply(lambda v: not is_blank(v) and not _is_numeric_val(v))
             df = flag_col(df, flag_name, mask)
+        else:
+            df[flag_name] = ""
+
+    # Rule 2 applies: number_of_household — blank/null/zero flagged unless exempt
+    if "number_of_household" in df.columns:
+        def _non_numeric_hh(v):
+            if is_blank(v):
+                return False
+            return not _is_numeric_val(v)
+        hh_wrong_type = df["number_of_household"].apply(_non_numeric_hh)
+        hh_blank_zero = df["number_of_household"].apply(
+            lambda v: is_blank(v) or (
+                _is_numeric_val(v) and float(str(v).strip()) == 0
+            )
+        )
+        df = flag_col(df, "Wrong Entry Number of Household",
+                      hh_wrong_type | (hh_blank_zero & ~exempt_pop_activity))
+    else:
+        df["Wrong Entry Number of Household"] = ""
+
+    # noncompliant_household and team_code: zero is a valid entry — do NOT flag zero;
+    # only flag blank/null (subject to Rule 2 exemption) or non-numeric text (always).
+    for src_col, flag_name in [
+        ("noncompliant_household", "Non-Numerical NonCompliant Household"),
+        ("team_code",              "Non-Numerical Team Code"),
+    ]:
+        if src_col in df.columns:
+            wrong_type_mask = df[src_col].apply(
+                lambda v: not is_blank(v) and not _is_numeric_val(v)
+            )
+            blank_only_mask = df[src_col].apply(is_blank)
+            # zero is valid — excluded from flagging entirely
+            combined_mask = wrong_type_mask | (blank_only_mask & ~exempt_pop_activity)
+            df = flag_col(df, flag_name, combined_mask)
         else:
             df[flag_name] = ""
 
@@ -705,29 +769,26 @@ def run_attribute_checks(df, progress_cb=None):
             return sv, True
         day_fixed, day_wrong = zip(*df["day_of_activity"].apply(_fix_day))
         df["day_of_activity"] = list(day_fixed)
-        df = flag_col(df, "Wrong Entry Day of Activity Entry", pd.Series(day_wrong))
+        # Rule 2: suppress day_of_activity flag for Validated Unknown or Abandoned/Migrated
+        day_wrong_series = pd.Series(day_wrong, index=df.index) & ~exempt_pop_activity
+        df = flag_col(df, "Wrong Entry Day of Activity Entry", day_wrong_series)
     else:
         df["Wrong Entry Day of Activity Entry"] = ""
 
-    # ── Validated Unknown override ─────────────────────────────────────────
-    # If validation_status = 'Validated Unknown', the following 6 critical-flag
-    # sub-conditions are not applicable and must be set to blank.
-    VALIDATED_UNKNOWN_EXEMPT_FLAGS = [
-        "Wrong Entry Day of Activity Entry",
+    # ── Validated Unknown override (Urban/Rural/Scattered/SettlementType) ─────
+    # Rule 1 & 2 exemptions are applied inline above where each flag is computed.
+    # This block clears the remaining flags that are not applicable for
+    # Validated Unknown (Urban, Rural, Scattered, Settlement Type Conflict).
+    VU_EXEMPT_FLAGS = [
         "Settlement Type Conflict",
-        "Non-Numerical Number of Household",
         "Wrong Entry Urban",
         "Wrong Entry Rural",
         "Wrong Entry Scattered",
     ]
-    if "validation_status" in df.columns:
-        is_validated_unknown = df["validation_status"].apply(
-            lambda v: safe_str(v) == "Validated Unknown"
-        )
-        for flag_name in VALIDATED_UNKNOWN_EXEMPT_FLAGS:
-            if flag_name in df.columns:
-                df.loc[is_validated_unknown, flag_name] = ""
-    # ──────────────────────────────────────────────────────────────────────
+    for flag_name in VU_EXEMPT_FLAGS:
+        if flag_name in df.columns:
+            df.loc[is_validated_unknown, flag_name] = ""
+    # ──────────────────────────────────────────────────────────────────────────
 
     return df
 
@@ -1380,7 +1441,7 @@ def main():
                     ("6","Wrong Entry Day of Activity Entry = 'Y'",
                      "Day of activity accepts: 1, 2, 3, 4, 1_2, 1_3, 1_4, 2_3, 2_4, 3_4, 1_2_3, 1_2_4, 1_3_4, 2_3_4, 1_2_3_4, NA. "
                      "⚠️ Ignored if validation_status = 'Validated Unknown'."),
-                    ("7","Non-Numerical Number of Household = 'Y'",
+                    ("7","Wrong Entry Number of Household = 'Y'",
                      "Remove non-numerical entries. ⚠️ Ignored if validation_status = 'Validated Unknown'."),
                     ("8","Wrong Entry Urban = 'Y'",
                      "Must be 'Y' or 'N'. ⚠️ Ignored if validation_status = 'Validated Unknown'."),
