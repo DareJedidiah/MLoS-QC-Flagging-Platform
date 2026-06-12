@@ -8,6 +8,7 @@ import os
 import warnings
 import zipfile
 import tempfile
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -16,7 +17,21 @@ import plotly.express as px
 import plotly.graph_objects as go
 from rapidfuzz import fuzz
 
+# reportlab — PDF generation
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import cm
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+    HRFlowable, PageBreak
+)
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+
 warnings.filterwarnings("ignore")
+
+# ── Session state key ──────────────────────────────────────────────────────────
+_SS = "mlos_qaqc_results"  # single dict key holding all post-run state
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PAGE CONFIG & CUSTOM CSS
@@ -1100,6 +1115,13 @@ def render_sidebar():
 
         run_btn = st.button("▶  Run QA/QC", use_container_width=True, type="primary")
 
+        # Clear button — only shown when results exist
+        clear_btn = False
+        if _SS in st.session_state and st.session_state[_SS] is not None:
+            st.markdown("<br>", unsafe_allow_html=True)
+            clear_btn = st.button("🔄  Clear & Reset", use_container_width=True,
+                                  help="Clears all results and returns to the welcome page.")
+
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("""
         <div style='font-size:0.7rem; color:rgba(255,255,255,0.45) !important; line-height:1.6;'>
@@ -1114,7 +1136,7 @@ def render_sidebar():
             unsafe_allow_html=True
         )
 
-    return mlos_files, ward_file, sett_file, run_btn
+    return mlos_files, ward_file, sett_file, run_btn, clear_btn
 
 # ─────────────────────────────────────────────────────────────────────────────
 # FILE LOADERS
@@ -1169,9 +1191,19 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    mlos_files, ward_file, sett_file, run_btn = render_sidebar()
+    # Initialise session state slot
+    if _SS not in st.session_state:
+        st.session_state[_SS] = None
 
-    if not run_btn:
+    mlos_files, ward_file, sett_file, run_btn, clear_btn = render_sidebar()
+
+    # ── Clear button handler ───────────────────────────────────────────────────
+    if clear_btn:
+        st.session_state[_SS] = None
+        st.rerun()
+
+    # ── Welcome page (no results yet) ─────────────────────────────────────────
+    if st.session_state[_SS] is None and not run_btn:
         if not mlos_files:
             # ── Getting Started Banner ──────────────────────────────────────
             st.markdown(f"""
@@ -1232,58 +1264,39 @@ def main():
                 <p style='color:{PURE_BLACK} !important; font-size:0.88rem; margin-bottom:0.8rem;'>
                 Three data sources are required to run the QA/QC. Upload them in the sidebar as described below.
                 </p>
-                """, unsafe_allow_html=True)
-
-                src_data = [
-                    ("1", "State MLoS", "User input (CSV or Excel)", "—"),
-                    ("2", "Ward Boundary", "eHA Ward Boundary",
-                     "https://drive.google.com/drive/folders/1Mtp1gZ7hd7ENk9u99f5NVlxsgSl1Dba1?usp=sharing"),
-                    ("3", "Grid3 Extent v3.1", "Grid3 Extent States Folder (pick your state)",
-                     "https://drive.google.com/drive/folders/1jVtU3J9MsZnkoMk6l8zl4oDmIehmPimx?usp=sharing"),
-                ]
-
-                rows_html = ""
-                for sn, data, source, link in src_data:
-                    link_cell = (
-                        f"<a href='{link}' target='_blank' style='color:{BLUE_MID} !important; font-weight:600;'>🔗 Download</a>"
-                        if link != "—" else "<span style='color:#999;'>—</span>"
-                    )
-                    rows_html += f"""
-                    <tr>
-                      <td style='padding:0.5rem 0.8rem; border-bottom:1px solid #E2E8F0; color:{PURE_BLACK} !important; font-weight:600; width:40px;'>{sn}</td>
-                      <td style='padding:0.5rem 0.8rem; border-bottom:1px solid #E2E8F0; color:{PURE_BLACK} !important; font-weight:600;'>{data}</td>
-                      <td style='padding:0.5rem 0.8rem; border-bottom:1px solid #E2E8F0; color:{PURE_BLACK} !important;'>{source}</td>
-                      <td style='padding:0.5rem 0.8rem; border-bottom:1px solid #E2E8F0;'>{link_cell}</td>
-                    </tr>"""
-
-                st.markdown(f"""
-                <div style='overflow-x:auto; border-radius:8px; border:1px solid #E2E8F0;'>
-                <table style='width:100%; border-collapse:collapse; font-family:"Open Sans",sans-serif; font-size:0.84rem; background:#FFFFFF;'>
+                <table style='width:100%; border-collapse:collapse; font-family:"Open Sans",sans-serif; font-size:0.83rem;'>
                   <thead>
                     <tr style='background:{BLUE_DARK};'>
-                      <th style='padding:0.6rem 0.8rem; color:#FFFFFF; text-align:left; font-weight:600;'>#</th>
-                      <th style='padding:0.6rem 0.8rem; color:#FFFFFF; text-align:left; font-weight:600;'>Data</th>
-                      <th style='padding:0.6rem 0.8rem; color:#FFFFFF; text-align:left; font-weight:600;'>Source</th>
-                      <th style='padding:0.6rem 0.8rem; color:#FFFFFF; text-align:left; font-weight:600;'>Download Link</th>
+                      <th style='padding:0.5rem 0.8rem; color:#FFFFFF; text-align:left; min-width:160px;'>Input</th>
+                      <th style='padding:0.5rem 0.8rem; color:#FFFFFF; text-align:left; min-width:90px;'>Format</th>
+                      <th style='padding:0.5rem 0.8rem; color:#FFFFFF; text-align:left;'>Notes</th>
                     </tr>
                   </thead>
-                  <tbody>{rows_html}</tbody>
+                  <tbody>
+                    <tr style='background:#FFFFFF;'>
+                      <td style='padding:0.45rem 0.8rem; border-bottom:1px solid #E2E8F0; font-weight:600; color:{BLUE_MID} !important;'>MLoS State Files</td>
+                      <td style='padding:0.45rem 0.8rem; border-bottom:1px solid #E2E8F0; color:{PURE_BLACK} !important;'>CSV / Excel</td>
+                      <td style='padding:0.45rem 0.8rem; border-bottom:1px solid #E2E8F0; color:{PURE_BLACK} !important;'>One or more state files. Must match the 40-column MLoS schema exactly.</td>
+                    </tr>
+                    <tr style='background:{BLUE_FAINT};'>
+                      <td style='padding:0.45rem 0.8rem; border-bottom:1px solid #E2E8F0; font-weight:600; color:{BLUE_MID} !important;'>Ward Boundary</td>
+                      <td style='padding:0.45rem 0.8rem; border-bottom:1px solid #E2E8F0; color:{PURE_BLACK} !important;'>Shapefile (.zip) / GeoJSON</td>
+                      <td style='padding:0.45rem 0.8rem; border-bottom:1px solid #E2E8F0; color:{PURE_BLACK} !important;'>eHA ward boundary file used for Outside State/LGA/Ward checks. Optional but recommended.</td>
+                    </tr>
+                    <tr style='background:#FFFFFF;'>
+                      <td style='padding:0.45rem 0.8rem; font-weight:600; color:{BLUE_MID} !important;'>Grid3 Settlement Extent</td>
+                      <td style='padding:0.45rem 0.8rem; color:{PURE_BLACK} !important;'>Shapefile (.zip) / GeoJSON</td>
+                      <td style='padding:0.45rem 0.8rem; color:{PURE_BLACK} !important;'>Grid3 Nigeria Settlement Extents v3.1. Used for "Not Intersecting Settlement Extent" check. Optional.</td>
+                    </tr>
+                  </tbody>
                 </table>
-                </div>
                 """, unsafe_allow_html=True)
 
             # Tab 2 — MLoS Schema
             with kn_tab2:
-                st.markdown(f"""
-                <p style='color:{PURE_BLACK} !important; font-size:0.88rem; margin-bottom:0.8rem;'>
-                The MLoS file schema must match <strong>exactly</strong> — same column names and same order.
-                If there is a mismatch, the platform will reject that file.
-                </p>
-                """, unsafe_allow_html=True)
-
                 schema_rows = [
-                    ("1","sn","serial","Unique sequential numeric identifier"),
-                    ("2","unique_code","varchar","Concatenation of state, LGA, ward and settlement name"),
+                    ("1","sn","int","Serial number / row index"),
+                    ("2","unique_code","varchar","Auto-generated: State_LGA_Ward_Settlement"),
                     ("3","state_name","varchar","State name"),
                     ("4","lga_name","varchar","LGA name"),
                     ("5","ward_name","varchar","Ward name"),
@@ -1413,44 +1426,107 @@ def main():
 
         return
 
-    if not mlos_files:
-        st.error("Please upload at least one MLoS file before running QA/QC.")
+    # ── RUN QA/QC — only execute processing when Run button is pressed ─────────
+    if run_btn:
+        if not mlos_files:
+            st.error("Please upload at least one MLoS file before running QA/QC.")
+            return
+
+        prog_text = st.empty()
+        prog_bar  = st.progress(0)
+
+        def update_progress(msg, pct):
+            prog_text.markdown(f"<div class='info-box'>⚙️ {msg}</div>", unsafe_allow_html=True)
+            prog_bar.progress(min(int(pct), 99))
+
+        update_progress("Loading spatial reference files…", 1)
+
+        ward_gdf       = load_spatial_file(ward_file)  if ward_file  else None
+        settlement_gdf = load_spatial_file(sett_file)  if sett_file  else None
+
+        update_progress("Validating schemas…", 3)
+
+        valid_frames   = []
+        dropped_states = []
+        schema_report  = []
+
+        for uf in mlos_files:
+            try:
+                df_raw = load_mlos_file(uf)
+            except Exception as e:
+                dropped_states.append((uf.name, f"Load error: {e}"))
+                schema_report.append({"File": uf.name, "Status": "❌ Load Error", "Detail": str(e)})
+                continue
+
+            ok, msg = validate_schema(df_raw, uf.name)
+            if ok:
+                valid_frames.append(df_raw)
+                schema_report.append({"File": uf.name, "Status": "✅ Valid", "Detail": msg})
+            else:
+                dropped_states.append((uf.name, msg))
+                schema_report.append({"File": uf.name, "Status": "❌ Dropped", "Detail": msg})
+
+        if not valid_frames:
+            prog_bar.progress(0)
+            prog_text.empty()
+            st.error("No valid MLoS files found. Check column names and order then re-upload.")
+            return
+
+        update_progress("Merging state files…", 4)
+        df_all = pd.concat(valid_frames, ignore_index=True)
+        df_all.columns = [c.strip() for c in df_all.columns]
+        total_raw = len(df_all)
+
+        update_progress("Preparing data (TRIM, unique_code, coordinate cleaning)…", 6)
+        df_all = prepare_data(df_all)
+
+        df_all = run_attribute_checks(df_all, progress_cb=update_progress)
+
+        update_progress("Running spatial QA/QC…", 48)
+        df_all = run_spatial_checks(df_all, ward_gdf=ward_gdf, settlement_gdf=settlement_gdf, progress_cb=update_progress)
+
+        update_progress("Computing summary flags…", 85)
+        df_all = compute_summary_flags(df_all)
+
+        update_progress("Ordering output columns…", 90)
+        df_out = order_output_columns(df_all)
+
+        prog_bar.progress(100)
+        prog_text.markdown("<div class='info-box'>✅ QA/QC complete!</div>", unsafe_allow_html=True)
+
+        # ── Persist results to session state ──────────────────────────────────
+        states_available = sorted(df_out["state_name"].dropna().unique().tolist()) \
+            if "state_name" in df_out.columns else []
+        summary_tbl = build_state_summary(df_out)
+
+        st.session_state[_SS] = {
+            "df_out":          df_out,
+            "schema_report":   schema_report,
+            "schema_report_df": pd.DataFrame(schema_report),
+            "dropped_states":  dropped_states,
+            "total_raw":       total_raw,
+            "n_valid_files":   len(valid_frames),
+            "n_dropped_files": len(dropped_states),
+            "states_available":states_available,
+            "summary_tbl":     summary_tbl,
+        }
+        # Clear progress widgets now results are saved
+        prog_text.empty()
+        prog_bar.empty()
+
+    # ── RESULTS RENDERING — drawn from session state on every rerun ────────────
+    res = st.session_state[_SS]
+    if res is None:
         return
 
-    prog_text = st.empty()
-    prog_bar  = st.progress(0)
+    df_out          = res["df_out"]
+    schema_report   = res["schema_report"]
+    dropped_states  = res["dropped_states"]
+    total_raw       = res["total_raw"]
+    states_available= res["states_available"]
+    summary_tbl     = res["summary_tbl"]
 
-    def update_progress(msg, pct):
-        prog_text.markdown(f"<div class='info-box'>⚙️ {msg}</div>", unsafe_allow_html=True)
-        prog_bar.progress(min(int(pct), 99))
-
-    update_progress("Loading spatial reference files…", 1)
-
-    ward_gdf       = load_spatial_file(ward_file)  if ward_file  else None
-    settlement_gdf = load_spatial_file(sett_file)  if sett_file  else None
-
-    update_progress("Validating schemas…", 3)
-
-    valid_frames   = []
-    dropped_states = []
-    schema_report  = []
-
-    for uf in mlos_files:
-        try:
-            df_raw = load_mlos_file(uf)
-        except Exception as e:
-            dropped_states.append((uf.name, f"Load error: {e}"))
-            schema_report.append({"File": uf.name, "Status": "❌ Load Error", "Detail": str(e)})
-            continue
-
-        ok, msg = validate_schema(df_raw, uf.name)
-        if ok:
-            valid_frames.append(df_raw)
-            schema_report.append({"File": uf.name, "Status": "✅ Valid", "Detail": msg})
-        else:
-            dropped_states.append((uf.name, msg))
-            schema_report.append({"File": uf.name, "Status": "❌ Dropped", "Detail": msg})
-
+    # Schema validation table
     st.markdown("<div class='section-title'>📋 Schema Validation</div>", unsafe_allow_html=True)
     schema_df = pd.DataFrame(schema_report)
     st.dataframe(schema_df, use_container_width=True, hide_index=True)
@@ -1459,35 +1535,7 @@ def main():
         dropped_html = "<br>".join([f"<b>{n}</b>: {r}" for n, r in dropped_states])
         st.markdown(f"<div class='dropped-box'>⛔ <b>Dropped files (schema mismatch):</b><br>{dropped_html}</div>", unsafe_allow_html=True)
 
-    if not valid_frames:
-        st.error("No valid MLoS files found. Check column names and order then re-upload.")
-        prog_bar.progress(0)
-        prog_text.empty()
-        return
-
-    update_progress("Merging state files…", 4)
-    df_all = pd.concat(valid_frames, ignore_index=True)
-    df_all.columns = [c.strip() for c in df_all.columns]
-    total_raw = len(df_all)
-
-    update_progress("Preparing data (TRIM, unique_code, coordinate cleaning)…", 6)
-    df_all = prepare_data(df_all)
-
-    df_all = run_attribute_checks(df_all, progress_cb=update_progress)
-
-    update_progress("Running spatial QA/QC…", 48)
-    df_all = run_spatial_checks(df_all, ward_gdf=ward_gdf, settlement_gdf=settlement_gdf, progress_cb=update_progress)
-
-    update_progress("Computing summary flags…", 85)
-    df_all = compute_summary_flags(df_all)
-
-    update_progress("Ordering output columns…", 90)
-    df_out = order_output_columns(df_all)
-
-    prog_bar.progress(100)
-    prog_text.markdown("<div class='info-box'>✅ QA/QC complete!</div>", unsafe_allow_html=True)
-
-    states_available = sorted(df_out["state_name"].dropna().unique().tolist()) if "state_name" in df_out.columns else []
+    # ── State filter — stored in session state so it survives reruns ───────────
     st.markdown("<div class='section-title'>🔎 Filter by State</div>", unsafe_allow_html=True)
     selected_states = st.multiselect(
         "Select states to drill down (leave empty for all)",
@@ -1497,6 +1545,7 @@ def main():
     )
     df_view = df_out[df_out["state_name"].isin(selected_states)] if selected_states else df_out
 
+    # ── Summary metrics ────────────────────────────────────────────────────────
     st.markdown("<div class='section-title'>📊 Summary Metrics</div>", unsafe_allow_html=True)
     total   = len(df_view)
     n_crit  = (df_view.get("Critical Error Flag","") == "Y").sum() if "Critical Error Flag" in df_view.columns else 0
@@ -1518,10 +1567,11 @@ def main():
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Requirement 2: Dedicated isolation engine & download structure for Critical Flag items
+    # ── Critical errors panel ──────────────────────────────────────────────────
     st.markdown("<div class='section-title'>🚨 Critical Errors Review Panel</div>", unsafe_allow_html=True)
-    df_critical = df_view[df_view["Critical Error Flag"] == "Y"]
-    
+    df_critical = df_view[df_view["Critical Error Flag"] == "Y"] \
+        if "Critical Error Flag" in df_view.columns else pd.DataFrame()
+
     if not df_critical.empty:
         st.dataframe(df_critical, use_container_width=True, height=280)
         crit_bytes = to_csv_bytes(df_critical)
@@ -1535,6 +1585,7 @@ def main():
     else:
         st.success("No records with active critical error flags discovered within current state profile constraints.")
 
+    # ── Charts ────────────────────────────────────────────────────────────────
     st.markdown("<div class='section-title'>📈 Quality Overview Charts</div>", unsafe_allow_html=True)
 
     tab1, tab2, tab3, tab4 = st.tabs([
@@ -1567,53 +1618,338 @@ def main():
         else:
             st.info("State name column not found.")
 
+    # ── State-level summary table ──────────────────────────────────────────────
     st.markdown("<div class='section-title'>📋 State-level Summary Table</div>", unsafe_allow_html=True)
-    summary_tbl = build_state_summary(df_view)
     if not summary_tbl.empty:
         def _amber_critical(val):
-            """Highlight non-zero critical error counts in amber."""
             try:
                 if int(val) > 0:
                     return "background-color: #D97706; color: #FFFFFF; font-weight: 700;"
             except (ValueError, TypeError):
                 pass
             return ""
-
-        # pandas >= 2.1 renamed applymap → map; support both versions
         _style_method = getattr(summary_tbl.style, "map", None) or getattr(summary_tbl.style, "applymap")
         styled_summary = _style_method(_amber_critical, subset=["Critical Errors"])
         st.dataframe(styled_summary, use_container_width=True, hide_index=True)
 
+    # ── Data preview ───────────────────────────────────────────────────────────
     st.markdown("<div class='section-title'>🗃️ Data Preview (first 500 rows)</div>", unsafe_allow_html=True)
     preview_cols = list(df_out.columns[:15]) + ["Critical Error Flag","Spatial Issues","Attribute Issues","No Issues","Confirm with Programs team"]
     preview_cols = [c for c in preview_cols if c in df_view.columns]
     st.dataframe(df_view[preview_cols].head(500), use_container_width=True, height=320)
 
+    # ── Downloads ─────────────────────────────────────────────────────────────
     st.markdown("<div class='section-title'>⬇️ Download Output</div>", unsafe_allow_html=True)
-    csv_bytes = to_csv_bytes(df_out)
-    st.download_button(
-        label=f"⬇️  Download Full QA/QC Output CSV  ({len(df_out):,} records)",
-        data=csv_bytes,
-        file_name="MLoS_QAQC_Output.csv",
-        mime="text/csv",
-    )
-    if selected_states:
-        csv_filtered = to_csv_bytes(df_view)
+
+    dl_col1, dl_col2, dl_col3 = st.columns([1, 1, 1])
+
+    with dl_col1:
+        csv_bytes = to_csv_bytes(df_out)
         st.download_button(
-            label=f"⬇️  Download Filtered ({', '.join(selected_states)}) CSV  ({len(df_view):,} records)",
-            data=csv_filtered,
-            file_name=f"MLoS_QAQC_{'_'.join(selected_states)}.csv",
+            label=f"⬇️  Full QA/QC Output CSV  ({len(df_out):,} records)",
+            data=csv_bytes,
+            file_name="MLoS_QAQC_Output.csv",
             mime="text/csv",
+            key="download_full_csv",
         )
+
+    with dl_col2:
+        if selected_states:
+            csv_filtered = to_csv_bytes(df_view)
+            st.download_button(
+                label=f"⬇️  Filtered CSV — {', '.join(selected_states)}  ({len(df_view):,} records)",
+                data=csv_filtered,
+                file_name=f"MLoS_QAQC_{'_'.join(selected_states)}.csv",
+                mime="text/csv",
+                key="download_filtered_csv",
+            )
+
+    with dl_col3:
+        # PDF report — generated lazily and cached in session state
+        if "pdf_bytes" not in res or res["pdf_bytes"] is None:
+            with st.spinner("Generating PDF report…"):
+                try:
+                    pdf_bytes = generate_pdf_report(res)
+                    st.session_state[_SS]["pdf_bytes"] = pdf_bytes
+                except Exception as e:
+                    st.session_state[_SS]["pdf_bytes"] = None
+                    st.warning(f"PDF generation failed: {e}")
+
+        pdf_data = st.session_state[_SS].get("pdf_bytes")
+        if pdf_data:
+            run_label = datetime.now().strftime("%Y%m%d_%H%M")
+            st.download_button(
+                label="📄  Download PDF Report",
+                data=pdf_data,
+                file_name=f"MLoS_QAQC_Report_{run_label}.pdf",
+                mime="application/pdf",
+                key="download_pdf_report",
+            )
 
     st.markdown("<br><br>", unsafe_allow_html=True)
     st.markdown(f"""
     <div style='text-align:center; font-size:0.72rem; color:#000000; padding:1rem;'>
-    MLoS QA/QC Platform · EPSG:4326 · {total_raw:,} records ingested from {len(valid_frames)} state file(s)
+    MLoS QA/QC Platform · EPSG:4326 · {total_raw:,} records ingested from {res['n_valid_files']} state file(s)
     {f' · {len(dropped_states)} file(s) dropped' if dropped_states else ''}
     </div>
     """, unsafe_allow_html=True)
 
 
-if __name__ == "__main__":
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PDF REPORT GENERATOR
+# ─────────────────────────────────────────────────────────────────────────────
+
+def generate_pdf_report(res: dict) -> bytes:
+    """Build a QA/QC summary PDF and return it as bytes."""
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=A4,
+        leftMargin=2*cm, rightMargin=2*cm,
+        topMargin=2*cm, bottomMargin=2*cm,
+        title="MLoS QA/QC Report",
+    )
+
+    PAGE_W = A4[0] - 4*cm  # usable width
+
+    styles = getSampleStyleSheet()
+    H1 = ParagraphStyle("h1", parent=styles["Heading1"],
+                        fontSize=16, textColor=colors.HexColor(BLUE_DARK),
+                        spaceAfter=6)
+    H2 = ParagraphStyle("h2", parent=styles["Heading2"],
+                        fontSize=12, textColor=colors.HexColor(BLUE_MID),
+                        spaceBefore=14, spaceAfter=4)
+    BODY = ParagraphStyle("body", parent=styles["Normal"],
+                          fontSize=9, leading=13,
+                          textColor=colors.black)
+    SMALL = ParagraphStyle("small", parent=styles["Normal"],
+                           fontSize=8, leading=11,
+                           textColor=colors.HexColor("#555555"))
+    CELL  = ParagraphStyle("cell", parent=styles["Normal"],
+                           fontSize=8, leading=10,
+                           textColor=colors.black)
+
+    story = []
+
+    # ── Cover / header ─────────────────────────────────────────────────────────
+    story.append(Paragraph("MLoS QA/QC Platform", H1))
+    story.append(Paragraph("Master List of Settlements · Quality Assurance &amp; Quality Control Report", BODY))
+    story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor(BLUE_PALE),
+                            spaceAfter=8))
+
+    run_ts = datetime.now().strftime("%d %B %Y, %H:%M")
+    meta_data = [
+        ["Run date/time:", run_ts],
+        ["Total records ingested:", f"{res['total_raw']:,}"],
+        ["Valid state files processed:", str(res['n_valid_files'])],
+        ["Dropped files:", str(res['n_dropped_files'])],
+        ["States in output:", str(len(res['states_available']))],
+    ]
+    meta_tbl = Table(meta_data, colWidths=[5*cm, PAGE_W - 5*cm])
+    meta_tbl.setStyle(TableStyle([
+        ("FONTNAME", (0,0), (0,-1), "Helvetica-Bold"),
+        ("FONTSIZE", (0,0), (-1,-1), 9),
+        ("TEXTCOLOR", (0,0), (-1,-1), colors.black),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+        ("TOPPADDING", (0,0), (-1,-1), 4),
+    ]))
+    story.append(meta_tbl)
+    story.append(Spacer(1, 12))
+
+    # ── Schema validation results ───────────────────────────────────────────────
+    story.append(Paragraph("1. Schema Validation", H2))
+    schema_df = res["schema_report_df"]
+    tbl_data = [list(schema_df.columns)] + schema_df.values.tolist()
+    col_ws = [PAGE_W * 0.35, PAGE_W * 0.18, PAGE_W * 0.47]
+    schema_tbl = Table(
+        [[Paragraph(str(c), CELL) for c in row] for row in tbl_data],
+        colWidths=col_ws,
+        repeatRows=1,
+    )
+    schema_tbl.setStyle(TableStyle([
+        ("BACKGROUND",  (0,0), (-1,0), colors.HexColor(BLUE_DARK)),
+        ("TEXTCOLOR",   (0,0), (-1,0), colors.white),
+        ("FONTNAME",    (0,0), (-1,0), "Helvetica-Bold"),
+        ("FONTSIZE",    (0,0), (-1,-1), 8),
+        ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#EFF6FF")]),
+        ("GRID",        (0,0), (-1,-1), 0.3, colors.HexColor("#CBD5E1")),
+        ("TOPPADDING",  (0,0), (-1,-1), 4),
+        ("BOTTOMPADDING",(0,0),(-1,-1), 4),
+    ]))
+    story.append(schema_tbl)
+    story.append(Spacer(1, 10))
+
+    # ── Summary metrics (all states) ───────────────────────────────────────────
+    story.append(Paragraph("2. Summary Metrics (All States)", H2))
+    df_out = res["df_out"]
+    total   = len(df_out)
+    n_crit  = (df_out.get("Critical Error Flag","") == "Y").sum() if "Critical Error Flag" in df_out.columns else 0
+    n_spat  = (df_out.get("Spatial Issues","")      == "Y").sum() if "Spatial Issues"      in df_out.columns else 0
+    n_attr  = (df_out.get("Attribute Issues","")    == "Y").sum() if "Attribute Issues"    in df_out.columns else 0
+    n_clean = (df_out.get("No Issues","")           == "Y").sum() if "No Issues"           in df_out.columns else 0
+
+    def pct(n, t): return f"{n/t*100:.1f}%" if t else "N/A"
+
+    metrics_data = [
+        ["Metric", "Count", "% of Records"],
+        ["Total Records",    f"{total:,}",   "100%"],
+        ["Critical Errors",  f"{n_crit:,}",  pct(n_crit, total)],
+        ["Spatial Issues",   f"{n_spat:,}",  pct(n_spat, total)],
+        ["Attribute Issues", f"{n_attr:,}",  pct(n_attr, total)],
+        ["Clean Records",    f"{n_clean:,}", pct(n_clean, total)],
+    ]
+    col_ws_m = [PAGE_W*0.50, PAGE_W*0.25, PAGE_W*0.25]
+    metrics_tbl = Table(metrics_data, colWidths=col_ws_m)
+    metrics_tbl.setStyle(TableStyle([
+        ("BACKGROUND",  (0,0), (-1,0), colors.HexColor(BLUE_DARK)),
+        ("TEXTCOLOR",   (0,0), (-1,0), colors.white),
+        ("FONTNAME",    (0,0), (-1,0), "Helvetica-Bold"),
+        ("FONTSIZE",    (0,0), (-1,-1), 9),
+        ("ALIGN",       (1,0), (-1,-1), "CENTER"),
+        ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#EFF6FF")]),
+        # Highlight critical row
+        ("BACKGROUND",  (0,2), (-1,2), colors.HexColor("#FEF2F2")),
+        ("TEXTCOLOR",   (0,2), (-1,2), colors.HexColor(RED_FLAG)),
+        ("FONTNAME",    (0,2), (-1,2), "Helvetica-Bold"),
+        ("GRID",        (0,0), (-1,-1), 0.3, colors.HexColor("#CBD5E1")),
+        ("TOPPADDING",  (0,0), (-1,-1), 5),
+        ("BOTTOMPADDING",(0,0),(-1,-1), 5),
+    ]))
+    story.append(metrics_tbl)
+    story.append(Spacer(1, 10))
+
+    # ── State-level summary table ───────────────────────────────────────────────
+    story.append(Paragraph("3. State-Level Summary", H2))
+    summary_tbl_df = res["summary_tbl"]
+    if not summary_tbl_df.empty:
+        st_data = [list(summary_tbl_df.columns)] + summary_tbl_df.values.tolist()
+        n_cols = len(summary_tbl_df.columns)
+        cw = PAGE_W / n_cols
+        col_ws_s = [PAGE_W*0.22] + [cw * 0.95] * (n_cols - 1)
+        state_tbl = Table(
+            [[Paragraph(str(c), CELL) for c in row] for row in st_data],
+            colWidths=col_ws_s,
+            repeatRows=1,
+        )
+        state_tbl.setStyle(TableStyle([
+            ("BACKGROUND",  (0,0), (-1,0), colors.HexColor(BLUE_DARK)),
+            ("TEXTCOLOR",   (0,0), (-1,0), colors.white),
+            ("FONTNAME",    (0,0), (-1,0), "Helvetica-Bold"),
+            ("FONTSIZE",    (0,0), (-1,-1), 8),
+            ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#EFF6FF")]),
+            ("GRID",        (0,0), (-1,-1), 0.3, colors.HexColor("#CBD5E1")),
+            ("TOPPADDING",  (0,0), (-1,-1), 3),
+            ("BOTTOMPADDING",(0,0),(-1,-1), 3),
+        ]))
+        story.append(state_tbl)
+    else:
+        story.append(Paragraph("State breakdown not available (state_name column missing).", SMALL))
+    story.append(Spacer(1, 10))
+
+    # ── Critical errors detail (up to 100 rows) ────────────────────────────────
+    story.append(PageBreak())
+    story.append(Paragraph("4. Critical Errors Detail (up to 100 records)", H2))
+    df_crit = df_out[df_out.get("Critical Error Flag", pd.Series(dtype=str)) == "Y"] \
+        if "Critical Error Flag" in df_out.columns else pd.DataFrame()
+
+    if not df_crit.empty:
+        story.append(Paragraph(
+            f"Total records with active critical error flags: <b>{len(df_crit):,}</b>. "
+            f"Showing first {min(100, len(df_crit))} rows below.",
+            BODY))
+        story.append(Spacer(1, 6))
+
+        crit_cols = ["state_name","lga_name","ward_name","settlement_name",
+                     "Critical Error Flag"] + \
+                    [c for c in CRITICAL_ERROR_FLAGS if c in df_crit.columns]
+        crit_cols = [c for c in crit_cols if c in df_crit.columns]
+        sample = df_crit[crit_cols].head(100)
+
+        crit_tbl_data = [crit_cols] + sample.fillna("").values.tolist()
+        crit_col_w = PAGE_W / len(crit_cols)
+        crit_table = Table(
+            [[Paragraph(str(v)[:60], CELL) for v in row] for row in crit_tbl_data],
+            colWidths=[crit_col_w] * len(crit_cols),
+            repeatRows=1,
+        )
+        crit_table.setStyle(TableStyle([
+            ("BACKGROUND",  (0,0), (-1,0), colors.HexColor("#991B1B")),
+            ("TEXTCOLOR",   (0,0), (-1,0), colors.white),
+            ("FONTNAME",    (0,0), (-1,0), "Helvetica-Bold"),
+            ("FONTSIZE",    (0,0), (-1,-1), 7),
+            ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#FFF7F7")]),
+            ("GRID",        (0,0), (-1,-1), 0.25, colors.HexColor("#FEE2E2")),
+            ("TOPPADDING",  (0,0), (-1,-1), 3),
+            ("BOTTOMPADDING",(0,0),(-1,-1), 3),
+        ]))
+        story.append(crit_table)
+    else:
+        story.append(Paragraph(
+            "No records with active critical error flags were found in this dataset.", BODY))
+
+    story.append(Spacer(1, 12))
+
+    # ── Flag coverage summary ───────────────────────────────────────────────────
+    story.append(Paragraph("5. Flag Coverage Summary", H2))
+    story.append(Paragraph(
+        "Number of records flagged (Y) for each QA/QC check across all states:", BODY))
+    story.append(Spacer(1, 4))
+
+    flag_rows = [["Flag Name", "Count", "% of Records", "Category"]]
+    def _cat(f):
+        if f in CRITICAL_ERROR_FLAGS: return "Critical"
+        if f in SPATIAL_FLAGS: return "Spatial"
+        if f in ATTRIBUTE_FLAGS: return "Attribute"
+        return "Summary"
+
+    for f in OUTPUT_FLAG_COLUMNS:
+        if f in df_out.columns:
+            cnt = (df_out[f] == "Y").sum()
+            if cnt > 0:
+                flag_rows.append([f, f"{cnt:,}", pct(cnt, total), _cat(f)])
+
+    flag_col_ws = [PAGE_W*0.46, PAGE_W*0.12, PAGE_W*0.14, PAGE_W*0.18]
+    flag_table = Table(
+        [[Paragraph(str(v), CELL) for v in row] for row in flag_rows],
+        colWidths=flag_col_ws,
+        repeatRows=1,
+    )
+
+    def _row_bg(i, cat):
+        if cat == "Critical": return colors.HexColor("#FEF2F2")
+        if cat == "Spatial":  return colors.HexColor("#EFF6FF")
+        if cat == "Attribute":return colors.HexColor("#FFFBEB")
+        return colors.white
+
+    flag_tbl_styles = [
+        ("BACKGROUND",  (0,0), (-1,0), colors.HexColor(BLUE_DARK)),
+        ("TEXTCOLOR",   (0,0), (-1,0), colors.white),
+        ("FONTNAME",    (0,0), (-1,0), "Helvetica-Bold"),
+        ("FONTSIZE",    (0,0), (-1,-1), 8),
+        ("GRID",        (0,0), (-1,-1), 0.25, colors.HexColor("#CBD5E1")),
+        ("TOPPADDING",  (0,0), (-1,-1), 3),
+        ("BOTTOMPADDING",(0,0),(-1,-1), 3),
+    ]
+    for i, row in enumerate(flag_rows[1:], start=1):
+        flag_tbl_styles.append(("BACKGROUND", (0,i), (-1,i), _row_bg(i, row[3])))
+
+    flag_table.setStyle(TableStyle(flag_tbl_styles))
+    story.append(flag_table)
+
+    # ── Footer ─────────────────────────────────────────────────────────────────
+    story.append(Spacer(1, 16))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#CBD5E1")))
+    story.append(Spacer(1, 4))
+    story.append(Paragraph(
+        f"MLoS QA/QC Platform · EPSG:4326 · Generated {run_ts} · "
+        f"{res['total_raw']:,} records from {res['n_valid_files']} state file(s)",
+        SMALL))
+
+    doc.build(story)
+    buf.seek(0)
+    return buf.read()
+
+
+if __name__ == '__main__':
     main()
