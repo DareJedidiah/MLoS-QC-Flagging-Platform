@@ -723,20 +723,17 @@ def run_attribute_checks(df, progress_cb=None):
         else:
             df[flag_name] = ""
 
-    # Rule 2 applies: number_of_household — blank/null/zero flagged unless exempt
+    # Rule 2 applies: number_of_household — blank/null flagged unless exempt;
+    # zero is a valid entry and must NOT be flagged.
     if "number_of_household" in df.columns:
-        def _non_numeric_hh(v):
-            if is_blank(v):
-                return False
-            return not _is_numeric_val(v)
-        hh_wrong_type = df["number_of_household"].apply(_non_numeric_hh)
-        hh_blank_zero = df["number_of_household"].apply(
-            lambda v: is_blank(v) or (
-                _is_numeric_val(v) and float(str(v).strip()) == 0
-            )
+        # Flag non-numeric text entries (never exempt — wrong type is always wrong)
+        hh_wrong_type = df["number_of_household"].apply(
+            lambda v: not is_blank(v) and not _is_numeric_val(v)
         )
+        # Flag blank/null entries only (zero is valid — excluded from flagging)
+        hh_blank_only = df["number_of_household"].apply(is_blank)
         df = flag_col(df, "Non-Numerical Number of Household",
-                      hh_wrong_type | (hh_blank_zero & ~exempt_pop_activity))
+                      hh_wrong_type | (hh_blank_only & ~exempt_pop_activity))
     else:
         df["Non-Numerical Number of Household"] = ""
 
