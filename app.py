@@ -358,7 +358,7 @@ ATTRIBUTE_FLAGS = [
     "Wrong Entry TargetPop","Population Conflict","Non-Numerical Latitude",
     "Non-Numerical Longitude","Non-Numerical Target Population",
     "Non-Numerical Sett Population","Non-Numerical Number of Household",
-    "Non-Numerical NonCompliant Household","Non-Numerical Team Code",
+    "Non-Numerical NonCompliant Household",
     "Wrong Entry Day of Activity Entry","Security and Accessibility conflict"
 ]
 
