@@ -64,7 +64,7 @@ st.markdown(f"""
     font-family: 'Open Sans', sans-serif;
   }}
 
-  /* Main content area: dark text on light backgrounds */
+  /* Main content area: dark text on light backgrounds — explicit so it works in both modes */
   .main .block-container p,
   .main .block-container div,
   .main .block-container span,
@@ -73,11 +73,44 @@ st.markdown(f"""
     color: {PURE_BLACK};
   }}
 
-  /* Sidebar */
+  /* ── Sidebar: always dark navy background with white text regardless of system theme ── */
   section[data-testid="stSidebar"] {{
     background: {BLUE_DARK} !important;
   }}
-  section[data-testid="stSidebar"] * {{
+  /* All text inside sidebar forced white */
+  section[data-testid="stSidebar"],
+  section[data-testid="stSidebar"] *,
+  section[data-testid="stSidebar"] p,
+  section[data-testid="stSidebar"] div,
+  section[data-testid="stSidebar"] span,
+  section[data-testid="stSidebar"] label,
+  section[data-testid="stSidebar"] small,
+  section[data-testid="stSidebar"] .stCaption,
+  section[data-testid="stSidebar"] .stMarkdown {{
+    color: {WHITE} !important;
+  }}
+  /* File uploader drag zone: dark background + white text so it shows in light mode */
+  section[data-testid="stSidebar"] [data-testid="stFileUploader"] {{
+    background: rgba(255,255,255,0.08) !important;
+    border: 1px dashed rgba(255,255,255,0.35) !important;
+    border-radius: 8px;
+  }}
+  section[data-testid="stSidebar"] [data-testid="stFileUploader"] *,
+  section[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] *,
+  section[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] span,
+  section[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] p,
+  section[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] small,
+  section[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] button {{
+    color: {WHITE} !important;
+    background-color: transparent !important;
+  }}
+  section[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] button {{
+    border-color: rgba(255,255,255,0.5) !important;
+    color: {WHITE} !important;
+  }}
+  /* Uploaded file tags */
+  section[data-testid="stSidebar"] [data-testid="stFileUploaderFile"] *,
+  section[data-testid="stSidebar"] [data-testid="stFileUploaderFileName"] {{
     color: {WHITE} !important;
   }}
   section[data-testid="stSidebar"] .stFileUploader label,
@@ -91,6 +124,16 @@ st.markdown(f"""
   }}
   section[data-testid="stSidebar"] hr {{
     border-color: rgba(255,255,255,0.15);
+  }}
+  /* Run button inside sidebar */
+  section[data-testid="stSidebar"] .stButton > button[kind="primary"] {{
+    background: {BLUE_MID} !important;
+    color: {WHITE} !important;
+    border: none !important;
+  }}
+  section[data-testid="stSidebar"] .stButton > button {{
+    color: {WHITE} !important;
+    border-color: rgba(255,255,255,0.4) !important;
   }}
 
   /* Top header bar */
@@ -268,6 +311,13 @@ st.markdown(f"""
   .stTabs [aria-selected="true"] span {{
     color: {WHITE} !important;
   }}
+  /* Flag Coverage Summary table — force black body text regardless of theme */
+  .flag-coverage-table td,
+  .flag-coverage-table td *,
+  .flag-coverage-table tr td {{
+    color: #000000 !important;
+  }}
+
   /* Tab panel: white background, dark text */
   .stTabs [data-baseweb="tab-panel"] {{
     background: {WHITE};
@@ -669,6 +719,7 @@ def run_attribute_checks(df, progress_cb=None):
     _progress("Checking population fields…", 38)
 
     # Rule 2: Compute exemption mask — Validated Unknown OR habitational_status is Abandoned/Migrated
+    #         OR accessibility_status is Inaccessible
     if "habitational_status" in df.columns:
         is_abandoned_or_migrated = df["habitational_status"].apply(
             lambda v: safe_str(v) in {"Abandoned", "Migrated"}
@@ -676,20 +727,31 @@ def run_attribute_checks(df, progress_cb=None):
     else:
         is_abandoned_or_migrated = pd.Series([False] * n, index=df.index)
 
-    exempt_pop_activity = is_validated_unknown | is_abandoned_or_migrated
+    if "accessibility_status" in df.columns:
+        is_inaccessible = df["accessibility_status"].apply(
+            lambda v: safe_str(v) == "Inaccessible"
+        )
+    else:
+        is_inaccessible = pd.Series([False] * n, index=df.index)
+
+    exempt_pop_activity = is_validated_unknown | is_abandoned_or_migrated | is_inaccessible
 
     def _bad_pop(v):
         if is_blank(v):
             return True
         try:
             fv = float(str(v).strip())
-            return fv <= 0
+            return fv < 0  # zero is now allowed; only negative values flag
         except (ValueError, TypeError):
             return True
 
     pop_mask = df["set_population"].apply(_bad_pop) if "set_population" in df.columns else pd.Series([False]*n)
     tgt_mask = df["set_target"].apply(_bad_pop) if "set_target" in df.columns else pd.Series([False]*n)
-    # Rule 2: suppress for exempt rows
+    # Rule 2: suppress for exempt rows; also, blank/zero entries for exempt rows do not flag
+    pop_zero_or_blank = df["set_population"].apply(lambda v: is_blank(v) or (not is_blank(v) and _bad_pop(v))) \
+        if "set_population" in df.columns else pd.Series([False]*n)
+    tgt_zero_or_blank = df["set_target"].apply(lambda v: is_blank(v) or (not is_blank(v) and _bad_pop(v))) \
+        if "set_target" in df.columns else pd.Series([False]*n)
     df = flag_col(df, "Wrong Entry Population", pop_mask & ~exempt_pop_activity)
     df = flag_col(df, "Wrong Entry TargetPop",  tgt_mask & ~exempt_pop_activity)
 
@@ -1156,18 +1218,40 @@ def render_sidebar():
         )
 
         st.markdown("<br><b style='color:#FFFFFF !important;'>STEP 3 · SETTLEMENT EXTENT</b>", unsafe_allow_html=True)
-        st.caption("Grid3 Settlement Extent v3.1 (.zip or GeoJSON)")
+        st.caption("Grid3 Settlement Extent v3.1 — up to 37 state files (.zip or GeoJSON)")
         st.markdown(
             "<a href='https://drive.google.com/drive/folders/1jVtU3J9MsZnkoMk6l8zl4oDmIehmPimx?usp=sharing' "
             "target='_blank' style='color:#93C5FD !important; font-size:0.75rem;'>🔗 Grid3 Extents Download</a>",
             unsafe_allow_html=True
         )
-        sett_file = st.file_uploader(
+        sett_files_raw = st.file_uploader(
             "Grid3 Settlement Extent",
             type=["zip","geojson","json"],
+            accept_multiple_files=True,
             key="sett_upload",
             label_visibility="collapsed",
         )
+        SETT_MAX_FILES = 37
+        if sett_files_raw:
+            if len(sett_files_raw) > SETT_MAX_FILES:
+                st.markdown(
+                    f"<div style='color:#FCA5A5 !important; font-size:0.78rem; margin-top:0.3rem;'>"
+                    f"&#9888; Too many files ({len(sett_files_raw)}). Please upload no more than {SETT_MAX_FILES} extent files.</div>",
+                    unsafe_allow_html=True,
+                )
+                sett_files = []
+            else:
+                sett_files = sett_files_raw
+                total_sett_mb = sum(f.size for f in sett_files) / 1024 / 1024
+                if len(sett_files) > 1:
+                    st.markdown(
+                        f"<div style='color:#86EFAC !important; font-size:0.75rem; margin-top:0.2rem;'>"
+                        f"&#10003; {len(sett_files)} extent files loaded "
+                        f"({total_sett_mb:.1f} MB total)</div>",
+                        unsafe_allow_html=True,
+                    )
+        else:
+            sett_files = []
 
         st.markdown("<hr>", unsafe_allow_html=True)
 
@@ -1194,7 +1278,7 @@ def render_sidebar():
             unsafe_allow_html=True
         )
 
-    return mlos_files, ward_file, sett_file, run_btn, clear_btn
+    return mlos_files, ward_file, sett_files, run_btn, clear_btn
 
 # ─────────────────────────────────────────────────────────────────────────────
 # FILE LOADERS
@@ -1234,6 +1318,42 @@ def load_spatial_file(uploaded_file):
         st.warning(f"Could not load spatial file {uploaded_file.name}: {e}")
         return None
 
+
+def load_multiple_spatial_files(uploaded_files):
+    """Load and concatenate a list of spatial uploaded files into one GeoDataFrame."""
+    if not uploaded_files:
+        return None
+    try:
+        import geopandas as gpd
+    except ImportError:
+        st.warning("GeoPandas not available — spatial checks will be skipped.")
+        return None
+
+    gdfs = []
+    for uf in uploaded_files:
+        gdf = load_spatial_file(uf)
+        if gdf is not None:
+            gdfs.append(gdf)
+
+    if not gdfs:
+        return None
+    if len(gdfs) == 1:
+        return gdfs[0]
+
+    # Harmonise CRS to the first file's CRS before concat
+    base_crs = gdfs[0].crs
+    harmonised = [gdfs[0]]
+    for g in gdfs[1:]:
+        if g.crs != base_crs:
+            g = g.to_crs(base_crs)
+        harmonised.append(g)
+
+    # pd is already imported at module level
+    return gpd.GeoDataFrame(
+        pd.concat(harmonised, ignore_index=True),
+        crs=base_crs,
+    )
+
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN APP
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1253,7 +1373,7 @@ def main():
     if _SS not in st.session_state:
         st.session_state[_SS] = None
 
-    mlos_files, ward_file, sett_file, run_btn, clear_btn = render_sidebar()
+    mlos_files, ward_file, sett_files, run_btn, clear_btn = render_sidebar()
 
     # ── Clear button handler ───────────────────────────────────────────────────
     if clear_btn:
@@ -1499,8 +1619,8 @@ def main():
 
         update_progress("Loading spatial reference files…", 1)
 
-        ward_gdf       = load_spatial_file(ward_file)  if ward_file  else None
-        settlement_gdf = load_spatial_file(sett_file)  if sett_file  else None
+        ward_gdf       = load_spatial_file(ward_file)         if ward_file   else None
+        settlement_gdf = load_multiple_spatial_files(sett_files) if sett_files  else None
 
         update_progress("Validating schemas…", 3)
 
@@ -1690,11 +1810,86 @@ def main():
         styled_summary = _style_method(_amber_critical, subset=["Critical Errors"])
         st.dataframe(styled_summary, use_container_width=True, hide_index=True)
 
-    # ── Data preview ───────────────────────────────────────────────────────────
-    st.markdown("<div class='section-title'>🗃️ Data Preview (first 500 rows)</div>", unsafe_allow_html=True)
-    preview_cols = list(df_out.columns[:15]) + ["Critical Error Flag","Spatial Issues","Attribute Issues","No Issues","Confirm with Programs team"]
-    preview_cols = [c for c in preview_cols if c in df_view.columns]
-    st.dataframe(df_view[preview_cols].head(500), use_container_width=True, height=320)
+    # ── Flag Coverage Summary ──────────────────────────────────────────────────
+    st.markdown("<div class='section-title'>🏁 Flag Coverage Summary</div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='info-box' style='font-size:0.84rem;'>Number of records flagged <b>(Y)</b> for each QA/QC check "
+        f"across the current view ({total:,} records). Flags with zero hits are hidden.</div>",
+        unsafe_allow_html=True,
+    )
+
+    def _flag_category(f):
+        if f in CRITICAL_ERROR_FLAGS: return "Critical"
+        if f in SPATIAL_FLAGS:        return "Spatial"
+        if f in ATTRIBUTE_FLAGS:      return "Attribute"
+        return "Summary"
+
+    flag_summary_rows = []
+    for f in OUTPUT_FLAG_COLUMNS:
+        if f in df_view.columns:
+            cnt = (df_view[f] == "Y").sum()
+            if cnt > 0:
+                pct_val = f"{cnt / total * 100:.1f}%" if total else "N/A"
+                flag_summary_rows.append({
+                    "Flag Name":     f,
+                    "Count":         cnt,
+                    "% of Records":  pct_val,
+                    "Category":      _flag_category(f),
+                })
+
+    if flag_summary_rows:
+        def _row_colors(cat):
+            if cat == "Critical":  return "#FEF2F2"
+            if cat == "Spatial":   return "#EFF6FF"
+            if cat == "Attribute": return "#FFFBEB"
+            return "#F1F5F9"
+
+        rows_html = ""
+        for r in flag_summary_rows:
+            bg = _row_colors(r["Category"])
+            rows_html += (
+                f"<tr style='background:{bg}; border:1px solid #000000;'>"
+                f"<td style='padding:0.42rem 0.75rem; border:1px solid #000000; color:#000000 !important; font-weight:600; font-size:0.83rem;'>{r['Flag Name'].title()}</td>"
+                f"<td style='padding:0.42rem 0.75rem; border:1px solid #000000; color:#000000 !important; font-size:0.83rem; text-align:center;'>{r['Count']:,}</td>"
+                f"<td style='padding:0.42rem 0.75rem; border:1px solid #000000; color:#000000 !important; font-size:0.83rem; text-align:center;'>{r['% of Records']}</td>"
+                f"<td style='padding:0.42rem 0.75rem; border:1px solid #000000; color:#000000 !important; font-size:0.83rem; text-align:center;'>{r['Category'].title()}</td>"
+                f"</tr>"
+            )
+
+        flag_html = f"""
+        <div class='flag-coverage-table' style='overflow-y:auto; max-height:420px; border-radius:6px; border:1px solid #000000;'>
+          <table style='width:100%; border-collapse:collapse; font-family:"Open Sans",sans-serif;'>
+            <thead>
+              <tr style='background:{BLUE_DARK}; position:sticky; top:0; z-index:1;'>
+                <th style='padding:0.5rem 0.75rem; color:#FFFFFF; text-align:left; border:1px solid #000000; font-size:0.83rem;'>Flag Name</th>
+                <th style='padding:0.5rem 0.75rem; color:#FFFFFF; text-align:center; border:1px solid #000000; font-size:0.83rem; min-width:70px;'>Count</th>
+                <th style='padding:0.5rem 0.75rem; color:#FFFFFF; text-align:center; border:1px solid #000000; font-size:0.83rem; min-width:100px;'>% of Records</th>
+                <th style='padding:0.5rem 0.75rem; color:#FFFFFF; text-align:center; border:1px solid #000000; font-size:0.83rem; min-width:90px;'>Category</th>
+              </tr>
+            </thead>
+            <tbody>{rows_html}</tbody>
+          </table>
+        </div>
+        """
+        st.markdown(flag_html, unsafe_allow_html=True)
+    else:
+        st.success("No flags triggered in the current view — all records are clean.")
+
+    # ── Build state-based filename prefix ─────────────────────────────────────
+    def _state_prefix(df_src):
+        """Return a prefix string derived from state_name(s) in the dataframe."""
+        if "state_name" not in df_src.columns:
+            return ""
+        unique_states = sorted(df_src["state_name"].dropna().unique().tolist())
+        if not unique_states:
+            return ""
+        if len(unique_states) == 1:
+            return f"{unique_states[0]}_"
+        # Multiple states: take left 3 chars of each, joined by underscores
+        abbrevs = [str(s)[:3] for s in unique_states]
+        return "_".join(abbrevs) + "_"
+
+    state_prefix = _state_prefix(df_out)
 
     # ── Downloads ─────────────────────────────────────────────────────────────
     st.markdown("<div class='section-title'>⬇️ Download Output</div>", unsafe_allow_html=True)
@@ -1706,7 +1901,7 @@ def main():
         st.download_button(
             label=f"⬇️  Full QA/QC Output CSV  ({len(df_out):,} records)",
             data=csv_bytes,
-            file_name="MLoS_QAQC_Output.csv",
+            file_name=f"{state_prefix}MLoS_QAQC_Output.csv",
             mime="text/csv",
             key="download_full_csv",
         )
@@ -1739,7 +1934,7 @@ def main():
             st.download_button(
                 label="📄  Download PDF Report",
                 data=pdf_data,
-                file_name=f"MLoS_QAQC_Report_{run_label}.pdf",
+                file_name=f"{state_prefix}MLoS_QAQC_Report_{run_label}.pdf",
                 mime="application/pdf",
                 key="download_pdf_report",
             )
@@ -1787,6 +1982,9 @@ def generate_pdf_report(res: dict) -> bytes:
     CELL  = ParagraphStyle("cell", parent=styles["Normal"],
                            fontSize=8, leading=10,
                            textColor=colors.black)
+    CELL_HDR = ParagraphStyle("cell_hdr", parent=styles["Normal"],
+                              fontSize=8, leading=10,
+                              textColor=colors.white, fontName="Helvetica-Bold")
 
     story = []
 
@@ -1821,7 +2019,7 @@ def generate_pdf_report(res: dict) -> bytes:
     tbl_data = [list(schema_df.columns)] + schema_df.values.tolist()
     col_ws = [PAGE_W * 0.35, PAGE_W * 0.18, PAGE_W * 0.47]
     schema_tbl = Table(
-        [[Paragraph(str(c), CELL) for c in row] for row in tbl_data],
+        [[Paragraph(str(c), CELL_HDR if ri == 0 else CELL) for c in row] for ri, row in enumerate(tbl_data)],
         colWidths=col_ws,
         repeatRows=1,
     )
@@ -1886,7 +2084,7 @@ def generate_pdf_report(res: dict) -> bytes:
         cw = PAGE_W / n_cols
         col_ws_s = [PAGE_W*0.22] + [cw * 0.95] * (n_cols - 1)
         state_tbl = Table(
-            [[Paragraph(str(c), CELL) for c in row] for row in st_data],
+            [[Paragraph(str(c), CELL_HDR if ri == 0 else CELL) for c in row] for ri, row in enumerate(st_data)],
             colWidths=col_ws_s,
             repeatRows=1,
         )
@@ -1905,51 +2103,9 @@ def generate_pdf_report(res: dict) -> bytes:
         story.append(Paragraph("State breakdown not available (state_name column missing).", SMALL))
     story.append(Spacer(1, 10))
 
-    # ── Critical errors detail (up to 100 rows) ────────────────────────────────
-    story.append(PageBreak())
-    story.append(Paragraph("4. Critical Errors Detail (up to 100 records)", H2))
-    df_crit = df_out[df_out.get("Critical Error Flag", pd.Series(dtype=str)) == "Y"] \
-        if "Critical Error Flag" in df_out.columns else pd.DataFrame()
-
-    if not df_crit.empty:
-        story.append(Paragraph(
-            f"Total records with active critical error flags: <b>{len(df_crit):,}</b>. "
-            f"Showing first {min(100, len(df_crit))} rows below.",
-            BODY))
-        story.append(Spacer(1, 6))
-
-        crit_cols = ["state_name","lga_name","ward_name","settlement_name",
-                     "Critical Error Flag"] + \
-                    [c for c in CRITICAL_ERROR_FLAGS if c in df_crit.columns]
-        crit_cols = [c for c in crit_cols if c in df_crit.columns]
-        sample = df_crit[crit_cols].head(100)
-
-        crit_tbl_data = [crit_cols] + sample.fillna("").values.tolist()
-        crit_col_w = PAGE_W / len(crit_cols)
-        crit_table = Table(
-            [[Paragraph(str(v)[:60], CELL) for v in row] for row in crit_tbl_data],
-            colWidths=[crit_col_w] * len(crit_cols),
-            repeatRows=1,
-        )
-        crit_table.setStyle(TableStyle([
-            ("BACKGROUND",  (0,0), (-1,0), colors.HexColor("#991B1B")),
-            ("TEXTCOLOR",   (0,0), (-1,0), colors.white),
-            ("FONTNAME",    (0,0), (-1,0), "Helvetica-Bold"),
-            ("FONTSIZE",    (0,0), (-1,-1), 7),
-            ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#FFF7F7")]),
-            ("GRID",        (0,0), (-1,-1), 0.25, colors.HexColor("#FEE2E2")),
-            ("TOPPADDING",  (0,0), (-1,-1), 3),
-            ("BOTTOMPADDING",(0,0),(-1,-1), 3),
-        ]))
-        story.append(crit_table)
-    else:
-        story.append(Paragraph(
-            "No records with active critical error flags were found in this dataset.", BODY))
-
-    story.append(Spacer(1, 12))
-
     # ── Flag coverage summary ───────────────────────────────────────────────────
-    story.append(Paragraph("5. Flag Coverage Summary", H2))
+    story.append(PageBreak())
+    story.append(Paragraph("4. Flag Coverage Summary", H2))
     story.append(Paragraph(
         "Number of records flagged (Y) for each QA/QC check across all states:", BODY))
     story.append(Spacer(1, 4))
@@ -1969,7 +2125,7 @@ def generate_pdf_report(res: dict) -> bytes:
 
     flag_col_ws = [PAGE_W*0.46, PAGE_W*0.12, PAGE_W*0.14, PAGE_W*0.18]
     flag_table = Table(
-        [[Paragraph(str(v), CELL) for v in row] for row in flag_rows],
+        [[Paragraph(str(v), CELL_HDR if ri == 0 else CELL) for v in row] for ri, row in enumerate(flag_rows)],
         colWidths=flag_col_ws,
         repeatRows=1,
     )
