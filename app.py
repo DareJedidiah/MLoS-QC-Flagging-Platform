@@ -1195,11 +1195,12 @@ def render_sidebar():
 
         st.markdown("<b style='color:#FFFFFF !important;'>STEP 1 · MLoS DATA FILES</b>", unsafe_allow_html=True)
         st.caption("Upload one or more state CSV/Excel files")
+        _rc = st.session_state.get("_upload_reset_count", 0)
         mlos_files = st.file_uploader(
             "MLoS Files (CSV or Excel)",
             type=["csv","xlsx","xls"],
             accept_multiple_files=True,
-            key="mlos_upload",
+            key=f"mlos_upload_{_rc}",
             label_visibility="collapsed",
         )
 
@@ -1213,9 +1214,23 @@ def render_sidebar():
         ward_file = st.file_uploader(
             "Ward Boundary",
             type=["zip","geojson","json"],
-            key="ward_upload",
+            key=f"ward_upload_{_rc}",
             label_visibility="collapsed",
         )
+        # Show cache status when no file is currently in the uploader
+        if not ward_file:
+            if "_ward_gdf_cache" in st.session_state:
+                st.markdown(
+                    "<div style='color:#86EFAC !important; font-size:0.74rem; margin-top:0.2rem;'>"
+                    "&#10003; Cached from previous upload — will be used on next run.</div>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    "<div style='color:#FCA5A5 !important; font-size:0.74rem; margin-top:0.2rem;'>"
+                    "&#9888; Not loaded — boundary checks will be skipped.</div>",
+                    unsafe_allow_html=True,
+                )
 
         st.markdown("<br><b style='color:#FFFFFF !important;'>STEP 3 · SETTLEMENT EXTENT</b>", unsafe_allow_html=True)
         st.caption("Grid3 Settlement Extent v3.1 — up to 37 state files (.zip or GeoJSON)")
@@ -1228,7 +1243,7 @@ def render_sidebar():
             "Grid3 Settlement Extent",
             type=["zip","geojson","json"],
             accept_multiple_files=True,
-            key="sett_upload",
+            key=f"sett_upload_{_rc}",
             label_visibility="collapsed",
         )
         SETT_MAX_FILES = 37
@@ -1252,17 +1267,28 @@ def render_sidebar():
                     )
         else:
             sett_files = []
+            # Show cache status when no file is currently in the uploader
+            if "_sett_gdf_cache" in st.session_state:
+                st.markdown(
+                    "<div style='color:#86EFAC !important; font-size:0.74rem; margin-top:0.2rem;'>"
+                    "&#10003; Cached from previous upload — will be used on next run.</div>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    "<div style='color:#FCA5A5 !important; font-size:0.74rem; margin-top:0.2rem;'>"
+                    "&#9888; Not loaded — settlement extent checks will be skipped.</div>",
+                    unsafe_allow_html=True,
+                )
 
         st.markdown("<hr>", unsafe_allow_html=True)
 
         run_btn = st.button("▶  Run QA/QC", use_container_width=True, type="primary")
 
-        # Clear button — only shown when results exist
-        clear_btn = False
-        if _SS in st.session_state and st.session_state[_SS] is not None:
-            st.markdown("<br>", unsafe_allow_html=True)
-            clear_btn = st.button("🔄  Clear & Reset", use_container_width=True,
-                                  help="Clears all results and returns to the welcome page.")
+        # Clear button — always visible
+        st.markdown("<br>", unsafe_allow_html=True)
+        clear_btn = st.button("🔄  Clear & Reset", use_container_width=True,
+                              help="Clears all uploaded files and results, returning to the welcome page.")
 
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("""
@@ -1372,12 +1398,21 @@ def main():
     # Initialise session state slot
     if _SS not in st.session_state:
         st.session_state[_SS] = None
+    if "_upload_reset_count" not in st.session_state:
+        st.session_state["_upload_reset_count"] = 0
 
     mlos_files, ward_file, sett_files, run_btn, clear_btn = render_sidebar()
 
     # ── Clear button handler ───────────────────────────────────────────────────
     if clear_btn:
+        # Wipe QA/QC results
         st.session_state[_SS] = None
+        # Wipe cached spatial GDFs
+        for _k in ("_ward_gdf_cache", "_sett_gdf_cache"):
+            st.session_state.pop(_k, None)
+        # Increment counter — all uploader keys change, forcing Streamlit to
+        # render brand-new empty widgets on the next rerun
+        st.session_state["_upload_reset_count"] += 1
         st.rerun()
 
     # ── Welcome page (no results yet) ─────────────────────────────────────────
@@ -1619,8 +1654,48 @@ def main():
 
         update_progress("Loading spatial reference files…", 1)
 
-        ward_gdf       = load_spatial_file(ward_file)         if ward_file   else None
-        settlement_gdf = load_multiple_spatial_files(sett_files) if sett_files  else None
+        # ── Spatial file loading with session-state caching ───────────────────
+        # After a session goes dormant, Streamlit file_uploader buffers are lost
+        # even if the widget still appears populated. We cache the parsed GDFs in
+        # session state so they survive dormancy and are reused automatically.
+
+        # Ward boundary
+        if ward_file:
+            _wgdf = load_spatial_file(ward_file)
+            if _wgdf is not None:
+                st.session_state["_ward_gdf_cache"] = _wgdf
+            ward_gdf = _wgdf
+        elif "_ward_gdf_cache" in st.session_state:
+            ward_gdf = st.session_state["_ward_gdf_cache"]
+            st.info("ℹ️ Ward Boundary: using previously loaded file (session cache). Re-upload if you need a different boundary.")
+        else:
+            ward_gdf = None
+
+        # Settlement extent (one or many files merged to one GDF)
+        if sett_files:
+            _sgdf = load_multiple_spatial_files(sett_files)
+            if _sgdf is not None:
+                st.session_state["_sett_gdf_cache"] = _sgdf
+            settlement_gdf = _sgdf
+        elif "_sett_gdf_cache" in st.session_state:
+            settlement_gdf = st.session_state["_sett_gdf_cache"]
+            st.info("ℹ️ Grid3 Settlement Extent: using previously loaded file(s) (session cache). Re-upload if you need different extents.")
+        else:
+            settlement_gdf = None
+
+        # Warn if either spatial layer is still missing so the user knows spatial
+        # checks will be skipped — not silently produce incomplete results.
+        _missing = []
+        if ward_gdf is None:
+            _missing.append("Ward Boundary")
+        if settlement_gdf is None:
+            _missing.append("Grid3 Settlement Extent")
+        if _missing:
+            st.warning(
+                f"⚠️ Spatial layer(s) not available: **{', '.join(_missing)}**. "
+                "Outside-boundary and settlement-extent checks will be skipped. "
+                "Upload the missing file(s) and re-run for complete results."
+            )
 
         update_progress("Validating schemas…", 3)
 
